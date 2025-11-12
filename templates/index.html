@@ -1,0 +1,778 @@
+{% extends "base.html" %}
+{% block content %}
+<!-- KPIs -->
+<div class="row g-2 mb-3">
+  <div class="col-6 col-md-3"><div class="stat"><div class="text-muted small">Pendientes</div><div class="fs-4 fw-semibold" id="kpiPend">0</div></div></div>
+  <div class="col-6 col-md-3"><div class="stat"><div class="text-muted small">Confirmadas</div><div class="fs-4 fw-semibold" id="kpiConf">0</div></div></div>
+  <div class="col-6 col-md-3"><div class="stat"><div class="text-muted small">Sustituidas</div><div class="fs-4 fw-semibold" id="kpiSubs">0</div></div></div>
+  <div class="col-6 col-md-3"><div class="stat"><div class="text-muted small">Canceladas</div><div class="fs-4 fw-semibold" id="kpiCanc">0</div></div></div>
+</div>
+<!-- Calendario de invitaciones -->
+<div id="invCalendar" class="mt-4">
+  <div class="row g-3">
+    <!-- Calendario -->
+    <div class="col-12 col-lg-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <div>
+            <button id="calPrev" class="btn btn-sm btn-outline-secondary me-2" title="Mes anterior">
+              <i class="bi bi-chevron-left"></i>
+            </button>
+            <button id="calNext" class="btn btn-sm btn-outline-secondary" title="Mes siguiente">
+              <i class="bi bi-chevron-right"></i>
+            </button>
+          </div>
+          <div class="fw-semibold" id="calTitle">—</div>
+          <div></div>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0" id="calTable">
+              <!-- aquí se renderiza el calendario -->
+            </table>
+          </div>
+          <div class="small text-muted mt-2">
+            • Punto indica que hay eventos ese día. Click para ver detalles →
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lista del día seleccionado -->
+    <div class="col-12 col-lg-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header">
+          <span class="fw-semibold">Eventos del día</span>
+          <span class="text-muted ms-2" id="calSelected">—</span>
+        </div>
+        <div class="card-body" id="calDayList">
+          <div class="text-muted small">Selecciona un día con eventos.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Panel: Eventos por persona -->
+<div class="card mb-4" id="panelPersonaEventos">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <h5 class="mb-0"><i class="fa fa-user-check me-2"></i>Eventos por persona</h5>
+    <span class="badge bg-primary" id="ppCount">0</span>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label mb-1">Buscar persona</label>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text"><i class="fa fa-search"></i></span>
+          <input id="ppBuscarNombre" class="form-control" placeholder="Nombre, cargo, unidad…" />
+          <button id="ppRecargarPersonas" class="btn btn-outline-secondary">Buscar</button>
+        </div>
+        <select id="ppPersona" class="form-select form-select-sm mt-2">
+          <option value="">— Selecciona persona —</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label mb-1">Desde</label>
+        <input id="ppDesde" type="date" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Hasta</label>
+        <input id="ppHasta" type="date" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Estatus</label>
+        <select id="ppEstatus" class="form-select form-select-sm">
+          <option value="">(Todos)</option>
+          <option value="Pendiente">Pendiente</option>
+          <option value="Confirmado">Confirmado</option>
+        </select>
+      </div>
+      <div class="col-md-1 d-grid">
+        <button id="ppVerEventos" class="btn btn-primary btn-sm">
+          <i class="fa fa-eye me-1"></i> Ver
+        </button>
+      </div>
+    </div>
+
+    <div class="table-responsive mt-3">
+      <table class="table table-sm table-striped align-middle">
+        <thead class="table-light">
+          <tr>
+            <th style="width:110px;">Fecha</th>
+            <th style="width:80px;">Hora</th>
+            <th>Evento</th>
+            <th>Municipio</th>
+            <th>Lugar</th>
+            <th>Convoca</th>
+            <th>Quien convoca</th>
+            <th style="width:110px;">Estatus</th>
+          </tr>
+        </thead>
+        <tbody id="ppTablaBody">
+          <tr><td colspan="9" class="text-muted">Sin datos…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="toolbar border rounded-3 p-2 p-md-3 bg-body-tertiary mb-3">
+  <div class="d-flex flex-wrap align-items-center gap-2">
+
+    <!-- Filtro por estatus -->
+    <div class="btn-group btn-group-sm" role="group" aria-label="Filtros" id="statusBtns">
+      <button class="btn btn-outline-secondary active" data-status="">
+        <i class="bi bi-list-ul me-1"></i> Todas
+      </button>
+      <button class="btn btn-outline-secondary" data-status="Pendiente">
+        <i class="bi bi-hourglass-split me-1"></i> Pendientes
+      </button>
+      <button class="btn btn-outline-secondary" data-status="Confirmado">
+        <i class="bi bi-check2-circle me-1"></i> Confirmadas
+      </button>
+      <button class="btn btn-outline-secondary" data-status="Sustituido">
+        <i class="bi bi-arrow-left-right me-1"></i> Sustituidas
+      </button>
+      <button class="btn btn-outline-secondary" data-status="Cancelado">
+        <i class="bi bi-x-circle me-1"></i> Canceladas
+      </button>
+    </div>
+
+    <div class="vr d-none d-md-inline mx-1"></div>
+
+    <!-- Rango de fechas + municipio -->
+    <div class="d-flex align-items-end gap-2 flex-wrap">
+      <div class="input-group input-group-sm" style="width: 13rem;">
+        <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
+        <input type="date" id="fDesde" class="form-control" aria-label="Desde">
+      </div>
+      <div class="input-group input-group-sm" style="width: 13rem;">
+        <span class="input-group-text"><i class="bi bi-calendar-range"></i></span>
+        <input type="date" id="fHasta" class="form-control" aria-label="Hasta">
+      </div>
+      <div class="input-group input-group-sm" style="width: 18rem;">
+        <span class="input-group-text"><i class="bi bi-geo-alt"></i></span>
+        <select id="fMuni" class="form-select">
+          <option value="">Todos los municipios</option>
+        </select>
+      </div>
+      <button id="btnFiltrarFechas" type="button" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-funnel me-1"></i> Aplicar
+      </button>
+      <button id="btnLimpiarFechas" type="button" class="btn btn-sm btn-link">
+        Limpiar
+      </button>
+    </div>
+
+    <!-- Acciones -->
+    <div class="ms-auto d-flex flex-wrap gap-2">
+      <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewPersona" type="button">
+        <i class="bi bi-person-plus me-1"></i> Persona
+      </button>
+      <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewActor" type="button">
+        <i class="bi bi-person-gear me-1"></i> Actor
+      </button>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCreate" type="button">
+        <i class="bi bi-plus-lg me-1"></i> Nueva invitación
+      </button>
+      <button id="btnExportXlsx" class="btn btn-outline-success btn-sm" type="button">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i> Exportar XLSX
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== Panel por categoría (Bootstrap Tabs) ===== -->
+<ul class="nav nav-tabs mb-3" id="tabsConvoca" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active d-flex align-items-center gap-2"
+            id="tab-dip-tab" data-bs-toggle="tab" data-bs-target="#tab-dip"
+            type="button" role="tab" aria-controls="tab-dip" aria-selected="true">
+      Diputaciones <span id="cntDip" class="badge rounded-pill bg-secondary">0</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link d-flex align-items-center gap-2"
+            id="tab-pres-tab" data-bs-toggle="tab" data-bs-target="#tab-pres"
+            type="button" role="tab" aria-controls="tab-pres" aria-selected="false">
+      Presidencia <span id="cntPres" class="badge rounded-pill bg-secondary">0</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link d-flex align-items-center gap-2"
+            id="tab-otros-tab" data-bs-toggle="tab" data-bs-target="#tab-otros"
+            type="button" role="tab" aria-controls="tab-otros" aria-selected="false">
+      Otros <span id="cntOtros" class="badge rounded-pill bg-secondary">0</span>
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content" id="tabsConvocaContent">
+  <div class="tab-pane fade show active" id="tab-dip" role="tabpanel" aria-labelledby="tab-dip-tab" tabindex="0">
+    <div id="groupDip" class="row g-3"></div>
+  </div>
+  <div class="tab-pane fade" id="tab-pres" role="tabpanel" aria-labelledby="tab-pres-tab" tabindex="0">
+    <div id="groupPres" class="row g-3"></div>
+  </div>
+  <div class="tab-pane fade" id="tab-otros" role="tabpanel" aria-labelledby="tab-otros-tab" tabindex="0">
+    <div id="groupOtros" class="row g-3"></div>
+  </div>
+</div>
+
+<!-- =====================
+     Modal: Gestionar
+====================== -->
+<!-- Modal: Gestionar invitación -->
+<div class="modal fade" id="modalAssign" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Gestionar invitación</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- aquí escribe tu meta (evento/fecha/hora) -->
+        <div id="assignMeta" class="small text-muted mb-2"></div>
+
+        <!-- PERSONA -->
+        <div class="mb-2">
+          <label class="form-label">Persona</label>
+          <select id="selPersona" class="form-select">
+            <option value="">— Sin asignar —</option>
+          </select>
+        </div>
+                <!-- Ficha de la persona seleccionada -->
+        <div id="personaInfo" class="border rounded p-2 mb-2 bg-light-subtle small">
+          <div class="text-muted">Selecciona una persona para ver sus datos…</div>
+        </div>
+
+        <!-- BOTONES DE ACCIÓN SOBRE LA PERSONA -->
+        <div class="d-flex gap-2 mb-2">
+          <button id="btnEditPersonaInline" type="button" class="btn btn-sm btn-outline-primary" disabled>
+            <i class="bi bi-pencil"></i> Editar persona
+          </button>
+          <button id="btnDeletePersonaInline" type="button" class="btn btn-sm btn-outline-danger" disabled>
+            <i class="bi bi-trash3"></i> Eliminar persona
+          </button>
+        </div>
+                <!-- ROL (se llena automáticamente con el Cargo de la persona seleccionada) -->
+        <div class="mb-2">
+          <label class="form-label">Cargo</label>
+          <input id="inpRol" class="form-control" placeholder="Cargo de la persona" disabled>
+        </div>
+
+        <!-- COMENTARIO -->
+        <div class="mb-2">
+          <label class="form-label">Comentario</label>
+          <textarea id="inpComentario" class="form-control" rows="2"></textarea>
+        </div>
+
+        <!-- (Opcional) ACTOR dentro del modal -->
+        <!--
+        <div class="mb-2">
+          <label class="form-label">Actor</label>
+          <select id="selActor" class="form-select">
+            <option value="">—</option>
+          </select>
+        </div>
+        -->
+
+        <div id="assignMsg" class="alert alert-danger d-none small mt-2"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btnAsignarGuardar" class="btn btn-primary">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- =========================
+     Modal: Crear invitación
+========================== -->
+<div class="modal fade" id="modalCreate" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Nueva invitación</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+
+    <div class="modal-body">
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label">Fecha</label>
+          <input id="cFecha" type="date" class="form-control">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Hora</label>
+          <input id="cHora" type="time" class="form-control">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Evento</label>
+        <input id="cEvento" class="form-control">
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Quien Convoca</label>
+        <select id="cConvocaCargo" class="form-select">
+          <option value="">-- Seleccione --</option>
+          <option>Diputadas y Diputados</option>
+          <option>Presidentas y Presidentes Municipales</option>
+        </select>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Partido Político</label>
+        <select id="cPartido" class="form-select">
+          <option value="">-- Seleccione partido --</option>
+        </select>
+      </div>
+
+      <div class="row g-2 mt-2">
+        <div class="col-6">
+          <label class="form-label">Municipio</label>
+          <select id="cMuni" class="form-select" required>
+            <option value="">Selecciona...</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label class="form-label">Lugar del Evento</label>
+          <input id="cLugar" class="form-control">
+        </div>
+      </div>
+
+      <hr class="my-3">
+      <div class="form-text mb-1">Selecciona el <b>Actor</b> que convoca (obligatorio).</div>
+      <div>
+        <label class="form-label">Actor</label>
+        <select id="cActor" class="form-select">
+          <option value="">—</option>
+        </select>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Archivo</label>
+        <input id="cArchivo" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+        <div id="filePreview" class="small text-muted mt-1"></div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Observaciones</label>
+        <textarea id="cObs" class="form-control" rows="2"></textarea>
+      </div>
+
+      <div id="cMsg" class="alert alert-danger small d-none mt-2"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="btnCrear" type="button" class="btn btn-primary">Crear</button>
+    </div>
+  </div></div>
+</div>
+
+
+<!-- =========================
+     Modal: Editar invitación
+========================= -->
+<div class="modal fade" id="modalEdit" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Editar invitación</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <input type="hidden" id="eId">
+
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label">Fecha</label>
+          <input id="eFecha" type="date" class="form-control">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Hora</label>
+          <input id="eHora" type="time" class="form-control">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Evento</label>
+        <input id="eEvento" class="form-control">
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Quién convoca</label>
+        <select id="eConvocaCargo" class="form-select">
+          <option value="">-- Seleccione --</option>
+          <option>Diputadas y Diputados</option>
+          <option>Presidentas y Presidentes Municipales</option>
+        </select>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Partido Político</label>
+        <select id="ePartido" class="form-select">
+          <option value="">-- Seleccione partido --</option>
+        </select>
+      </div>
+
+      <div class="row g-2 mt-2">
+        <div class="col-6">
+          <label class="form-label">Municipio</label>
+          <select id="eMuni" class="form-select" required>
+            <option value="">Selecciona...</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label class="form-label">Lugar del Evento</label>
+          <input id="eLugar" class="form-control">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Observaciones</label>
+        <textarea id="eObs" class="form-control" rows="2"></textarea>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Archivo</label>
+        <input id="eArchivo" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+        <div id="eFilePreview" class="small text-muted mt-1"></div>
+        <div class="d-flex gap-2 mt-1">
+          <a id="eFileLink" href="#" target="_blank" class="small d-none">Ver archivo actual</a>
+          <button id="eBtnFileRemove" type="button" class="btn btn-sm btn-outline-danger d-none">Quitar archivo</button>
+        </div>
+      </div>
+
+      <div id="eMsg" class="alert alert-danger small d-none mt-2"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="btnEditarGuardar" class="btn btn-primary">
+        Guardar cambios
+      </button>
+    </div>
+  </div></div>
+</div>
+
+<!-- =========================
+     Modal: Editar persona
+========================= -->
+<div class="modal fade" id="modalEditPersona" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Editar persona</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <input type="hidden" id="epID">
+
+      <div class="mb-2">
+        <label class="form-label">Nombre</label>
+        <input id="epNombre" class="form-control" placeholder="Nombre completo">
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">Cargo</label>
+        <input id="epCargo" class="form-control" placeholder="Cargo/rol">
+      </div>
+
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label">Teléfono (10 dígitos)</label>
+          <input id="epTelefono" class="form-control" maxlength="10" inputmode="numeric">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Correo</label>
+          <input id="epCorreo" type="email" class="form-control">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Unidad/Área</label>
+        <input id="epUnidad" class="form-control" placeholder="Unidad o región">
+      </div>
+
+      <div class="row g-2 mt-2">
+        <div class="col-6">
+          <label class="form-label">Sexo</label>
+          <select id="epSexo" class="form-select">
+            <option value="">—</option>
+            <!-- llena con tu catálogo de sexos (SexoID) -->
+          </select>
+        </div>
+        <div class="col-6 d-flex align-items-end">
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="epActivo">
+            <label class="form-check-label" for="epActivo">Activo</label>
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-3">
+      <div class="small text-muted mb-1">Particular (opcional)</div>
+      <div class="row g-2">
+        <div class="col-4">
+          <label class="form-label">Nombre</label>
+          <input id="epPartNombre" class="form-control">
+        </div>
+        <div class="col-4">
+          <label class="form-label">Cargo</label>
+          <input id="epPartCargo" class="form-control">
+        </div>
+        <div class="col-4">
+          <label class="form-label">Teléfono</label>
+          <input id="epPartTel" class="form-control" maxlength="10" inputmode="numeric">
+        </div>
+      </div>
+
+      <div id="epMsg" class="alert alert-danger small d-none mt-2"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="btnGuardarEditPersona" class="btn btn-primary">Guardar cambios</button>
+    </div>
+  </div></div>
+</div>
+<!-- =========================
+     Modal: Eliminar persona
+========================= -->
+<div class="modal fade" id="modalDeletePersona" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Eliminar persona</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <div class="mb-2">
+        ¿Eliminar a <b id="delPersonaName">—</b>?
+        <input type="hidden" id="delPersonaId">
+      </div>
+      <div class="alert alert-warning small">
+        Esta acción es definitiva. Si está asignada a invitaciones, se desasignará.
+      </div>
+      <div id="delPersonaMsg" class="alert alert-danger small d-none"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="btnEliminarPersonaConfirm" class="btn btn-danger">Eliminar</button>
+    </div>
+  </div></div>
+</div>
+
+<!-- =========================
+     Modal: Nueva persona
+========================= -->
+<div class="modal fade" id="modalNewPersona" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Agregar persona</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <div id="npMsg" class="alert alert-danger d-none small mb-2"></div>
+
+      <div class="row g-2">
+        <div class="col-md-7">
+          <label class="form-label">Nombre *</label>
+          <input id="npNombre" class="form-control" autocomplete="off">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">Sexo</label>
+          <select id="npSexo" class="form-select">
+            <option value="">—</option>
+            <!-- se llena vía loadSexos() -->
+          </select>
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Cargo *</label>
+        <input id="npCargo" class="form-control" autocomplete="off">
+      </div>
+
+      <div class="row g-2 mt-2">
+        <div class="col-md-6">
+          <label class="form-label">Teléfono (10 dígitos)</label>
+          <input id="npTelefono" class="form-control" inputmode="numeric" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Correo</label>
+          <input id="npCorreo" type="email" class="form-control" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Unidad/Región</label>
+        <input id="npUnidad" class="form-control" autocomplete="off">
+      </div>
+
+      <hr class="my-3">
+
+      <div class="fw-semibold mb-1">Contacto particular (opcional)</div>
+      <div class="row g-2">
+        <div class="col-md-6">
+          <label class="form-label">Nombre</label>
+          <input id="npPartNombre" class="form-control" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Cargo</label>
+          <input id="npPartCargo" class="form-control" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="form-label">Teléfono particular</label>
+        <input id="npPartTel" class="form-control" inputmode="numeric" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="btnGuardarPersona" class="btn btn-primary">
+        Guardar
+      </button>
+    </div>
+  </div></div>
+</div>
+
+
+<!-- ===================
+     Modal: Nuevo Actor
+==================== -->
+<div class="modal fade" id="modalNewActor" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Agregar nuevo actor</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <div class="mb-2">
+        <label class="form-label">Nombre</label>
+        <input id="naNombre" class="form-control" required>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Cargo</label>
+        <input id="naCargo" class="form-control">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Teléfono</label>
+        <input id="naTelefono" class="form-control" placeholder="10 dígitos">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Sexo</label>
+        <select id="naSexo" class="form-select">
+          <option value="">—</option>
+        </select>
+      </div>
+
+      <div class="mt-2 form-text">Datos del particular (si aplica)</div>
+      <div class="row g-2">
+        <div class="col-4"><input id="naPartNombre" class="form-control" placeholder="Nombre"></div>
+        <div class="col-4"><input id="naPartCargo" class="form-control" placeholder="Cargo"></div>
+        <div class="col-4"><input id="naPartTel" class="form-control" placeholder="Teléfono"></div>
+      </div>
+    </div>
+  <div class="modal-footer">
+    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+    <div class="ms-auto d-flex gap-2">
+      <button id="btnOpenEditActor" class="btn btn-outline-primary">Editar actor</button>
+      <button id="btnOpenDeleteActor" class="btn btn-outline-danger">Eliminar actor</button>
+      <button id="btnGuardarActor" class="btn btn-dark">Guardar</button>
+    </div>
+  </div>
+  </div></div>
+</div>
+
+<!-- ===================
+     Modal: Editar Actor
+==================== -->
+<div class="modal fade" id="modalEditActor" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Editar actor</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <div class="mb-2">
+        <label class="form-label">Selecciona actor</label>
+        <select id="eaActorSel" class="form-select">
+          <option value="">—</option>
+        </select>
+      </div>
+
+      <hr class="text-muted">
+
+      <div class="mb-2">
+        <label class="form-label">Nombre</label>
+        <input id="eaNombre" class="form-control">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Cargo</label>
+        <input id="eaCargo" class="form-control">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Teléfono</label>
+        <input id="eaTelefono" class="form-control" placeholder="10 dígitos">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Sexo</label>
+        <select id="eaSexo" class="form-select">
+          <option value="">—</option>
+        </select>
+      </div>
+
+      <div class="mt-2 form-text">Datos del particular (si aplica)</div>
+      <div class="row g-2">
+        <div class="col-4"><input id="eaPartNombre" class="form-control" placeholder="Nombre"></div>
+        <div class="col-4"><input id="eaPartCargo" class="form-control" placeholder="Cargo"></div>
+        <div class="col-4"><input id="eaPartTel" class="form-control" placeholder="Teléfono"></div>
+      </div>
+
+      <div id="eaMsg" class="alert alert-danger d-none mt-3"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+      <button id="btnActorUpdate" class="btn btn-primary">Guardar cambios</button>
+    </div>
+  </div></div>
+</div>
+<!-- ===================
+     Modal: Eliminar Actor
+==================== -->
+<div class="modal fade" id="modalDeleteActor" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Eliminar actor</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+
+    <div class="modal-body">
+      <div class="mb-2">
+        <label class="form-label">Selecciona actor</label>
+        <select id="daActorSel" class="form-select">
+          <option value="">—</option>
+        </select>
+      </div>
+      <div class="alert alert-warning small">
+        Esta acción <b>no se puede deshacer</b>. Si el actor está vinculado a invitaciones históricas, considera implementar borrado lógico.
+      </div>
+      <div id="daMsg" class="alert alert-danger d-none"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+      <button id="btnActorDeleteConfirm" class="btn btn-danger">Eliminar</button>
+    </div>
+  </div></div>
+</div>
+{% endblock %}

@@ -1,0 +1,296 @@
+body {
+  height: 100%;
+  margin: 0;
+}
+
+/* Mantiene el footer fijo visible */
+.navbar.fixed-bottom {
+  z-index: 1030;
+}
+html {
+  scroll-behavior: smooth; /* movimiento suave al hacer scroll */
+}
+
+main::after {
+  content: "";
+  display: block;
+  height: 6rem;  /* espacio visual adicional al final */
+  background: linear-gradient(to top, rgba(255,255,255,0.9), transparent);
+}
+.card-inv {
+  border:1px solid #99999a;
+  border-radius:16px;
+  background:#fff;
+  transition:box-shadow .2s;
+}
+.card-inv:hover {
+  box-shadow: 0 6px 28px rgba(16,24,40,.06);
+}
+.card-inv .hdr { 
+  font-weight:600; 
+  font-size:1rem; 
+}
+.badge-soft { 
+  background:#f1f3f5; 
+  color:#333; 
+  border-radius:999px; 
+  padding:.15rem .5rem; 
+}
+/* KPI cards */
+.stat {
+  background:#fff;
+  border:1px solid #e7e7ea;
+  border-radius:12px;
+  padding:.75rem 1rem;
+}
+.bi-paperclip {
+  font-size: 1rem;
+  transition: color 0.2s ease;
+}
+.bi-paperclip:hover {
+  color: #9f2241 !important;
+}
+
+.card-soon {
+  box-shadow: 0 0 0 2px rgba(255,193,7,.35); /* amarillo suave */
+}
+
+.card-today {
+  box-shadow: 0 0 0 2px rgba(220,53,69,.35); /* rojo suave */
+}
+
+/* Compacta la barra y homologa alturas */
+.toolbar .btn,
+.toolbar .form-control,
+.toolbar .input-group-text { height: 32px; }
+
+.toolbar .input-group-text {
+  background: transparent;
+  border-right: 0;
+}
+.toolbar .input-group .form-control { border-left: 0; }
+
+/* En móviles, que los grupos compartan todo el ancho si es necesario */
+@media (max-width: 576px) {
+  #statusBtns { width: 100%; }
+}
+#connBadge{transition:all .2s;}
+#connBadge.offline{background:#dc3545 !important;}
+/* Oculta el <select> original cuando TS lo envuelve */
+#selPersona.ts-hidden-accessible { display: none !important; }
+#selPersona + .ts-wrapper { width: 100%; }
+
+/* Dropdown dentro del modal y con scroll */
+#modalAssign .ts-dropdown { z-index: 2000; max-height: 260px; overflow: auto; }
+
+/* Asegura que el caret/input sean visibles para escribir */
+.ts-control input { display: inline-block !important; min-width: 2ch; }
+#groupDip, #groupPres { margin-bottom: .5rem; }
+
+  .cal-day {
+    width: 100%; height: 64px; vertical-align: top; position: relative; cursor: pointer;
+  }
+  .cal-day.disabled { opacity: .35; cursor: default; }
+  .cal-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; margin-left: .35rem; transform: translateY(-2px);
+  }
+  .cal-dot.has { background: currentColor; }
+  .flash {
+    animation: flashHi 1.6s ease;
+  }
+  @keyframes flashHi {
+    0%   { box-shadow: 0 0 0 0 rgba(13,110,253,.4); }
+    50%  { box-shadow: 0 0 0 8px rgba(13,110,253,.0); }
+    100% { box-shadow: 0 0 0 0 rgba(13,110,253,.0); }
+  }
+/* ===== Calendario: contenedor y header ===== */
+.cal-card {
+  border: 1px solid #e9ecef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+}
+
+.cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .75rem 1rem; border-bottom: 1px solid #f1f3f5;
+}
+#calTitle {
+  font-weight: 600; letter-spacing: .2px;
+}
+
+/* ===== Tabla calendario ===== */
+#calTable {
+  width: 100%;
+  border-collapse: separate; border-spacing: 0;
+}
+#calTable thead th {
+  font-size: .8rem; font-weight: 600; color: #6c757d;
+  padding: .75rem .5rem; text-transform: uppercase; letter-spacing: .5px;
+}
+#calTable td.cal-day {
+  width: calc(100% / 7);
+  padding: .55rem .55rem .6rem;
+  vertical-align: top;
+  border: 1px solid #f1f3f5;
+  background: #fff;
+  transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
+  cursor: pointer;
+}
+#calTable td.cal-day.disabled {
+  background: #fafbfc; color: #ccd1d7; cursor: default;
+}
+#calTable td.cal-day:hover:not(.disabled) {
+  background: #f9fbff;
+  box-shadow: inset 0 0 0 1px #e7f1ff;
+}
+#calTable td.cal-day.selected {
+  outline: 2px solid #0d6efd30;
+  box-shadow: inset 0 0 0 2px #0d6efd50;
+  background: #f5f9ff;
+}
+#calTable td.cal-day.today .cal-day-number {
+  background: #0d6efd; color: #fff;
+}
+.cal-day-number {
+  display: inline-block; min-width: 28px; height: 28px; line-height: 28px;
+  text-align: center; border-radius: 999px; font-weight: 600;
+}
+
+/* ===== Dots por estatus ===== */
+.cal-dots {
+  display: inline-flex; gap: 6px; align-items: center;
+}
+.cal-dot {
+  width: 8px; height: 8px; border-radius: 999px; background: #d0d7de; opacity: .9;
+}
+.cal-dot.pend { background: #ffc107; }   /* Pendiente → amarillo */
+.cal-dot.conf { background: #20c997; }   /* Confirmado → verde menta */
+.cal-dot.canc { background: #dc3545; }   /* Cancelado → rojo */
+.cal-dot.otros { background: #6c757d; }  /* Otros/indef → gris */
+
+/* Mini contador al pie del día */
+.cal-mini {
+  font-size: .72rem; color: #94a3b8; margin-top: .25rem;
+}
+
+/* ===== Panel lateral: eventos del día ===== */
+#dayPanel {
+  border: 1px solid #e9ecef; border-radius: 14px; background: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+}
+.day-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:.75rem 1rem; border-bottom:1px solid #f1f3f5;
+}
+.day-body {
+  max-height: 420px; overflow:auto; padding:.5rem .5rem;
+}
+.day-item {
+  border: 1px solid #eef1f4; border-radius: 10px; padding:.6rem .7rem;
+  margin:.35rem 0; background:#fff; transition: transform .06s ease, box-shadow .15s ease;
+}
+.day-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0,0,0,.05);
+}
+.day-item .title {
+  font-weight: 600; margin-bottom: .15rem;
+}
+.day-item .meta { font-size:.85rem; color:#6b7280; }
+.day-item .tags { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.35rem; }
+
+/* Botón “Ver tarjeta” compacto */
+.btn-goto {
+  padding: .25rem .5rem; font-size: .8rem;
+}
+
+/* ===== Glow al enfocar tarjeta ===== */
+.card-glow {
+  animation: glowFade 1.4s ease forwards;
+}
+@keyframes glowFade {
+  0%   { box-shadow: 0 0 0 3px rgba(13,110,253,.35); }
+  70%  { box-shadow: 0 0 0 3px rgba(13,110,253,.15); }
+  100% { box-shadow: none; }
+}
+/* ===== Día seleccionado: contorno + pulso ===== */
+#calTable td.cal-day.selected {
+  position: relative;
+  outline: 2px solid #0d6efd30;
+  box-shadow: inset 0 0 0 2px #0d6efd60;
+  background: #f5f9ff;
+}
+#calTable td.cal-day.selected::after {
+  content: "";
+  position: absolute; inset: -2px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 0 rgba(13,110,253,.25);
+  animation: calPulse 1.6s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes calPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(13,110,253,.25); }
+  70%  { box-shadow: 0 0 0 6px rgba(13,110,253,.12); }
+  100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); }
+}
+
+/* ===== Tarjeta enfocada: contorno “silhouette” animado ===== */
+.card-outline {
+  position: relative;
+  transition: box-shadow .2s ease, transform .06s ease;
+  box-shadow: 0 0 0 3px rgba(13,110,253,.35), 0 6px 16px rgba(0,0,0,.06);
+}
+.card-outline::after {
+  content: "";
+  position: absolute; inset: -4px; border-radius: 14px;
+  box-shadow: 0 0 0 0 rgba(13,110,253,.25);
+  animation: cardHalo 1.4s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes cardHalo {
+  0%   { box-shadow: 0 0 0 0 rgba(13,110,253,.25); }
+  60%  { box-shadow: 0 0 0 8px rgba(13,110,253,.12); }
+  100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); }
+}
+
+.detail-block {
+  border: 1px solid #eef0f3;
+  border-radius: .75rem;
+  background: #fff;
+}
+
+.detail-label {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6c757d;
+}
+
+.detail-value {
+  font-size: .95rem;
+}
+
+#modalDetails .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .15rem .5rem;
+  border-radius: 999px;
+  background: #f1f3f5;
+  border: 1px solid #e5e7eb;
+}
+
+#modalDetails .file-embed {
+  width: 100%;
+  height: 420px;
+  border: 1px solid #eef0f3;
+  border-radius: .5rem;
+}
+
+#modalDetails .img-preview {
+  max-width: 100%;
+  border: 1px solid #eef0f3;
+  border-radius: .5rem;
+}

@@ -1,0 +1,18 @@
+# --- Core web app ---
+Flask==3.0.3
+Flask-Cors==4.0.1
+gunicorn==22.0.0
+
+# --- ORM y base de datos ---
+SQLAlchemy==2.0.34
+psycopg[binary]==3.2.10
+
+# --- Seguridad y auth ---
+bcrypt==4.1.2
+PyJWT==2.9.0
+
+# --- Excel y reportes ---
+openpyxl>=3.1.5
+
+# --- Utilidades comunes ---
+python-dotenv==1.0.1
