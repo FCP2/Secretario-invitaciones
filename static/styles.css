@@ -294,3 +294,21 @@ main::after {
   border: 1px solid #eef0f3;
   border-radius: .5rem;
 }
+
+/* Scroll interno para la lista del día */
+.day-list {
+  overflow-y: auto;
+  max-height: 40vh;            /* límite visual, ajusta según el alto del panel */
+  overscroll-behavior: contain; /* evita mover toda la página */
+  padding-right: .25rem;        /* deja espacio para la barra */
+}
+
+/* En pantallas pequeñas el panel será un poco más bajo */
+@media (max-width: 576px) {
+  .day-list { max-height: 40vh; }
+}
+
+/* En monitores grandes, puedes aprovechar más espacio */
+@media (min-width: 1200px) {
+  .day-list { max-height: 50vh; }
+}
