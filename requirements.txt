@@ -16,3 +16,4 @@ openpyxl>=3.1.5
 
 # --- Utilidades comunes ---
 python-dotenv==1.0.1
+passlib==1.7.4
