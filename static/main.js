@@ -1935,6 +1935,11 @@ function renderDayList(dateYMD){
       </div>
     `;
   }).join('');
+      // asegura que tenga scroll
+  box.classList.add('day-list');
+
+  // cada vez que se renderiza, vuelve al inicio
+  box.scrollTop = 0;
 }
 
 // ===== Navegación de mes =====
