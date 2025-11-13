@@ -37,7 +37,6 @@
         </div>
       </div>
     </div>
-
     <!-- Lista del día seleccionado -->
     <div class="col-12 col-lg-5">
       <div class="card shadow-sm h-100">
@@ -57,20 +56,20 @@
 <!-- Panel: Eventos por persona -->
 <div class="card mb-4" id="panelPersonaEventos">
   <div class="card-header d-flex align-items-center justify-content-between">
-    <h5 class="mb-0"><i class="fa fa-user-check me-2"></i>Eventos por persona</h5>
+    <h5 class="mb-0"><i class="fa fa-user-check me-2"></i>Eventos por Representante de GEM</h5>
     <span class="badge bg-primary" id="ppCount">0</span>
   </div>
   <div class="card-body">
     <div class="row g-2 align-items-end">
       <div class="col-md-5">
-        <label class="form-label mb-1">Buscar persona</label>
+        <label class="form-label mb-1">Buscar representante de GEM</label>
         <div class="input-group input-group-sm">
           <span class="input-group-text"><i class="fa fa-search"></i></span>
           <input id="ppBuscarNombre" class="form-control" placeholder="Nombre, cargo, unidad…" />
           <button id="ppRecargarPersonas" class="btn btn-outline-secondary">Buscar</button>
         </div>
         <select id="ppPersona" class="form-select form-select-sm mt-2">
-          <option value="">— Selecciona persona —</option>
+          <option value="">— Selecciona —</option>
         </select>
       </div>
 
@@ -169,10 +168,10 @@
     <!-- Acciones -->
     <div class="ms-auto d-flex flex-wrap gap-2">
       <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewPersona" type="button">
-        <i class="bi bi-person-plus me-1"></i> Persona
+        <i class="bi bi-person-plus me-1"></i> Representante GEM
       </button>
       <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewActor" type="button">
-        <i class="bi bi-person-gear me-1"></i> Actor
+        <i class="bi bi-person-gear me-1"></i> PM
       </button>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCreate" type="button">
         <i class="bi bi-plus-lg me-1"></i> Nueva invitación
@@ -231,7 +230,7 @@
     <div class="modal-content">
 
       <div class="modal-header">
-        <h5 class="modal-title">Gestionar invitación</h5>
+        <h5 class="modal-title">Designar</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
 
@@ -241,29 +240,29 @@
 
         <!-- PERSONA -->
         <div class="mb-2">
-          <label class="form-label">Persona</label>
+          <label class="form-label">Representante de GEM</label>
           <select id="selPersona" class="form-select">
             <option value="">— Sin asignar —</option>
           </select>
         </div>
                 <!-- Ficha de la persona seleccionada -->
         <div id="personaInfo" class="border rounded p-2 mb-2 bg-light-subtle small">
-          <div class="text-muted">Selecciona una persona para ver sus datos…</div>
+          <div class="text-muted">Representante de GEM</div>
         </div>
 
         <!-- BOTONES DE ACCIÓN SOBRE LA PERSONA -->
         <div class="d-flex gap-2 mb-2">
           <button id="btnEditPersonaInline" type="button" class="btn btn-sm btn-outline-primary" disabled>
-            <i class="bi bi-pencil"></i> Editar persona
+            <i class="bi bi-pencil"></i> Editar Representante de GEM
           </button>
           <button id="btnDeletePersonaInline" type="button" class="btn btn-sm btn-outline-danger" disabled>
-            <i class="bi bi-trash3"></i> Eliminar persona
+            <i class="bi bi-trash3"></i> Eliminar Representante de GEM
           </button>
         </div>
                 <!-- ROL (se llena automáticamente con el Cargo de la persona seleccionada) -->
         <div class="mb-2">
           <label class="form-label">Cargo</label>
-          <input id="inpRol" class="form-control" placeholder="Cargo de la persona" disabled>
+          <input id="inpRol" class="form-control" placeholder="Cargo" disabled>
         </div>
 
         <!-- COMENTARIO -->
@@ -316,9 +315,14 @@
 
       <div class="mt-2">
         <label class="form-label">Evento</label>
-        <input id="cEvento" class="form-control">
+        <select id="cEvento" class="form-select">
+          <option value="">-- Seleccione --</option>
+          <option>Primer Informe en Cabildo</option>
+          <option>Primer Informe al Público</option>
+          <option>Primer Informe en Cabildo y al Público</option>
+        </select>
       </div>
-
+      
       <div class="mt-2">
         <label class="form-label">Quien Convoca</label>
         <select id="cConvocaCargo" class="form-select">
@@ -349,9 +353,9 @@
       </div>
 
       <hr class="my-3">
-      <div class="form-text mb-1">Selecciona el <b>Actor</b> que convoca (obligatorio).</div>
+      <div class="form-text mb-1">Selecciona el <b>PM</b> que convoca (obligatorio).</div>
       <div>
-        <label class="form-label">Actor</label>
+        <label class="form-label">PM</label>
         <select id="cActor" class="form-select">
           <option value="">—</option>
         </select>
@@ -404,7 +408,12 @@
 
       <div class="mt-2">
         <label class="form-label">Evento</label>
-        <input id="eEvento" class="form-control">
+        <select id="eEvento" class="form-select">
+          <option value="">-- Seleccione --</option>
+          <option>Primer Informe en Cabildo</option>
+          <option>Primer Informe al Público</option>
+          <option>Primer Informe en Cabildo y al Público</option>
+        </select>
       </div>
 
       <div class="mt-2">
@@ -468,7 +477,7 @@
 <div class="modal fade" id="modalEditPersona" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Editar persona</h5>
+      <h5 class="modal-title">Editar Representante de GEM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
 
@@ -497,7 +506,7 @@
       </div>
 
       <div class="mt-2">
-        <label class="form-label">Unidad/Área</label>
+        <label class="form-label">Unidad/Área/Secretaría</label>
         <input id="epUnidad" class="form-control" placeholder="Unidad o región">
       </div>
 
@@ -518,7 +527,7 @@
       </div>
 
       <hr class="my-3">
-      <div class="small text-muted mb-1">Particular (opcional)</div>
+      <div class="small text-muted mb-1">Particular (obligatorio)</div>
       <div class="row g-2">
         <div class="col-4">
           <label class="form-label">Nombre</label>
@@ -548,7 +557,7 @@
 <div class="modal fade" id="modalDeletePersona" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Eliminar persona</h5>
+      <h5 class="modal-title">Eliminar Representante de GEM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
 
@@ -575,7 +584,7 @@
 <div class="modal fade" id="modalNewPersona" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Agregar persona</h5>
+      <h5 class="modal-title">Agregar Representante de GEM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
 
@@ -613,13 +622,13 @@
       </div>
 
       <div class="mt-2">
-        <label class="form-label">Unidad/Región</label>
+        <label class="form-label">Unidad/Región/Secretaría</label>
         <input id="npUnidad" class="form-control" autocomplete="off">
       </div>
 
       <hr class="my-3">
 
-      <div class="fw-semibold mb-1">Contacto particular (opcional)</div>
+      <div class="fw-semibold mb-1">Contacto particular (obligatorio)</div>
       <div class="row g-2">
         <div class="col-md-6">
           <label class="form-label">Nombre</label>
@@ -652,7 +661,7 @@
 <div class="modal fade" id="modalNewActor" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Agregar nuevo actor</h5>
+      <h5 class="modal-title">Agregar PM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
     <div class="modal-body">
@@ -675,7 +684,7 @@
         </select>
       </div>
 
-      <div class="mt-2 form-text">Datos del particular (si aplica)</div>
+      <div class="mt-2 form-text">Datos del particular(Obligatorio)</div>
       <div class="row g-2">
         <div class="col-4"><input id="naPartNombre" class="form-control" placeholder="Nombre"></div>
         <div class="col-4"><input id="naPartCargo" class="form-control" placeholder="Cargo"></div>
@@ -685,8 +694,8 @@
   <div class="modal-footer">
     <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
     <div class="ms-auto d-flex gap-2">
-      <button id="btnOpenEditActor" class="btn btn-outline-primary">Editar actor</button>
-      <button id="btnOpenDeleteActor" class="btn btn-outline-danger">Eliminar actor</button>
+      <button id="btnOpenEditActor" class="btn btn-outline-primary">Editar PM</button>
+      <button id="btnOpenDeleteActor" class="btn btn-outline-danger">Eliminar PM</button>
       <button id="btnGuardarActor" class="btn btn-dark">Guardar</button>
     </div>
   </div>
@@ -699,13 +708,13 @@
 <div class="modal fade" id="modalEditActor" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Editar actor</h5>
+      <h5 class="modal-title">Editar PM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
 
     <div class="modal-body">
       <div class="mb-2">
-        <label class="form-label">Selecciona actor</label>
+        <label class="form-label">Selecciona PM</label>
         <select id="eaActorSel" class="form-select">
           <option value="">—</option>
         </select>
@@ -732,7 +741,7 @@
         </select>
       </div>
 
-      <div class="mt-2 form-text">Datos del particular (si aplica)</div>
+      <div class="mt-2 form-text">Datos del particular (Obligatorio)</div>
       <div class="row g-2">
         <div class="col-4"><input id="eaPartNombre" class="form-control" placeholder="Nombre"></div>
         <div class="col-4"><input id="eaPartCargo" class="form-control" placeholder="Cargo"></div>
@@ -754,19 +763,19 @@
 <div class="modal fade" id="modalDeleteActor" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog"><div class="modal-content">
     <div class="modal-header">
-      <h5 class="modal-title">Eliminar actor</h5>
+      <h5 class="modal-title">Eliminar PM</h5>
       <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
     </div>
 
     <div class="modal-body">
       <div class="mb-2">
-        <label class="form-label">Selecciona actor</label>
+        <label class="form-label">Selecciona PM</label>
         <select id="daActorSel" class="form-select">
           <option value="">—</option>
         </select>
       </div>
       <div class="alert alert-warning small">
-        Esta acción <b>no se puede deshacer</b>. Si el actor está vinculado a invitaciones históricas, considera implementar borrado lógico.
+        Esta acción <b>no se puede deshacer</b>. Si el PM está vinculado a invitaciones históricas, considera implementar borrado lógico.
       </div>
       <div id="daMsg" class="alert alert-danger d-none"></div>
     </div>
