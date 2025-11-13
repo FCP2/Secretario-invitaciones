@@ -2461,7 +2461,7 @@ async function loadPersonasForPanel(q = '') {
 }
 
 function renderPersonaOptions(selectEl, personas) {
-  selectEl.innerHTML = `<option value="">— Selecciona persona —</option>`;
+  selectEl.innerHTML = `<option value="">— Selecciona representante de GEM —</option>`;
   for (const p of personas) {
     const u = p['Unidad/Región'] ? ` — ${p['Unidad/Región']}` : '';
     const c = p['Cargo'] ? ` (${p['Cargo']})` : '';
