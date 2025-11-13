@@ -297,7 +297,7 @@ function renderListInto(list, sel){
         </div>
         <div class="card-footer d-flex gap-2">
           <button class="btn btn-sm btn-primary" data-action="manage" data-id="${x.ID}">
-            <i class="bi bi-pencil-square me-1"></i>Gestionar
+            <i class="bi bi-pencil-square me-1"></i>Designar
           </button>
           <button class="btn btn-sm btn-warning" data-action="edit-inv" data-id="${x.ID}">
             <i class="bi bi-pencil me-1"></i>Editar
