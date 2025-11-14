@@ -1013,6 +1013,10 @@ def api_invitations_list():
                 "ArchivoMime": inv.archivo_mime,
                 "ArchivoTamano": inv.archivo_tamano,
                 "ArchivoURL": inv.archivo_url,  # si lo usas
+                    # ⬇️ nuevos
+                "GrupoToken": inv.grupo_token or "",
+                "SubTipo": inv.sub_tipo or "",
+                
             })
         return jsonify(rows)
     except Exception as e:
@@ -1095,7 +1099,6 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
 
 # ---- Crear invitación (solo actor_id obligatorio en tu flujo actual) ----
-# ---- Crear invitación (solo actor_id obligatorio en tu flujo actual) ----
 @app.post("/api/invitation/create")
 @auth_required
 def api_invitation_create():
@@ -1117,7 +1120,8 @@ def api_invitation_create():
         muni_in = (f.get("municipio") or "").strip()   # <- entrada cruda
         lugar   = (f.get("lugar") or "").strip()
         obs     = (f.get("observaciones") or "").strip()
-
+        grupo_token = (f.get("grupo_token") or "").strip()
+        sub_tipo    = (f.get("sub_tipo") or "").strip()  # 'pre'/'publico'/'mixto'
         req = {"fecha": fecha, "hora": hora, "evento": evento,
                "convoca_cargo": cargo, "partido_politico": partido,
                "municipio": muni_in, "lugar": lugar}
@@ -1165,6 +1169,9 @@ def api_invitation_create():
             ultima_modificacion=datetime.utcnow(),
             modificado_por=getattr(g, "user", None).usuario if getattr(g, "user", None) else None,
             actor_id=int(actor_id),
+            grupo_token=grupo_token,
+            sub_tipo=sub_tipo,
+    # ...
         )
         db.add(inv)
         db.flush()
