@@ -313,16 +313,28 @@
         </div>
       </div>
 
-      <div class="mt-2">
-        <label class="form-label">Evento</label>
-        <select id="cEvento" class="form-select">
-          <option value="">-- Seleccione --</option>
-          <option>Primer Informe en Cabildo</option>
-          <option>Primer Informe al Público</option>
-          <option>Primer Informe en Cabildo y al Público</option>
-        </select>
-      </div>
-      
+      <div class="row">
+        <div class="col-6">
+          <label class="form-label">Evento</label>
+          <select id="cEvento" class="form-select">
+            <option value="">-- Seleccione --</option>
+            <option>Primer Informe en Cabildo</option>
+            <option>Primer Informe al Público</option>
+            <option>Primer Informe en Cabildo y al Público</option>
+          </select>
+        </div>
+                  <!-- Sub-tipo (se rellena automáticamente) -->
+          <div class="col-6 mt-2">
+            <label class="form-label">Tipo de evento</label>
+            <select id="cSubTipo" class="form-select">
+              <option value="">—</option>
+              <option value="pre">Pre (Cabildo)</option>
+              <option value="publico">Público</option>
+              <option value="mixto">Mixto</option>
+            </select>
+          </div>
+
+      </div>    
       <div class="mt-2">
         <label class="form-label">Quien Convoca</label>
         <select id="cConvocaCargo" class="form-select">
@@ -361,6 +373,24 @@
         </select>
       </div>
 
+<!-- Vincular a grupo -->
+          <div class="col-12 mt-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="cVincular">
+              <label class="form-check-label" for="cVincular">
+                Vincular esta invitación a un grupo (pre / público / mixto)
+              </label>
+            </div>
+          </div>
+
+          <div class="col-12 mt-2" id="cGrupoRow" style="display:none;">
+            <label class="form-label">Identificador de grupo</label>
+            <input id="cGrupoToken" class="form-control" placeholder="Ej. GRP-TOLUCA-01">
+            <div class="form-text">
+              Usa el mismo identificador para vincular pre + público. Si lo dejas vacío, se generará uno automático.
+            </div>
+          </div>
+
       <div class="mt-2">
         <label class="form-label">Archivo</label>
         <input id="cArchivo" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
@@ -381,7 +411,25 @@
   </div></div>
 </div>
 
-
+<!-- Modal: Eventos vinculados (grupo) -->
+<div class="modal fade" id="modalGrupo" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="grupoTitle">Eventos vinculados</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body" id="grupoBody">
+        <div class="text-muted small">Sin datos de grupo.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- =========================
      Modal: Editar invitación
 ========================= -->
