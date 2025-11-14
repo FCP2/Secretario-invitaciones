@@ -312,3 +312,47 @@ main::after {
 @media (min-width: 1200px) {
   .day-list { max-height: 50vh; }
 }
+
+/* Bordes/colores para grupos vinculados */
+.day-item.grp-color-1 {
+  border-left: 4px solid #0d6efd;
+  background-color: rgba(13, 110, 253, 0.04);
+}
+.day-item.grp-color-2 {
+  border-left: 4px solid #20c997;
+  background-color: rgba(32, 201, 151, 0.04);
+}
+.day-item.grp-color-3 {
+  border-left: 4px solid #ffc107;
+  background-color: rgba(255, 193, 7, 0.04);
+}
+.day-item.grp-color-4 {
+  border-left: 4px solid #fd7e14;
+  background-color: rgba(253, 126, 20, 0.04);
+}
+.day-item.grp-color-5 {
+  border-left: 4px solid #6f42c1;
+  background-color: rgba(111, 66, 193, 0.04);
+}
+
+/* Cuando se marca un grupo como enfocado */
+.day-item.group-focus {
+  box-shadow: 0 0 0 2px rgba(25, 135, 84, 0.5);
+}
+
+#calDayList.day-list {
+  max-height: 430px;
+  overflow-y: auto;
+}
+
+.day-item.group-focus {
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 .2rem rgba(13,110,253,.25);
+}
+
+.day-item.grp-a { border-left: 4px solid #0d6efd; }
+.day-item.grp-b { border-left: 4px solid #198754; }
+.day-item.grp-c { border-left: 4px solid #ffc107; }
+.day-item.grp-d { border-left: 4px solid #d63384; }
+.day-item.grp-e { border-left: 4px solid #20c997; }
+.day-item.grp-f { border-left: 4px solid #6f42c1; }
