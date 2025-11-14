@@ -16,6 +16,9 @@ let personaTS = null;
 let actorTS = null;
 let lastSeenISO = null;  // servidor nos devolverá "now" para encadenar
 
+// Para recordar el último grupo usado
+let LAST_GROUP_TOKEN = '';
+
 // ===== Utils DOM =====
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -115,25 +118,38 @@ async function loadPersonas(force=false) {
 }
 
 
-async function loadCatalog() {
-  let data = [];
-  try { data = await apiGet('/api/catalog'); } catch (e) { console.warn(e); }
-
-  catalogo = Array.isArray(data) ? data : [];
-  catalogIndex = {};
-  const sel = $('#selPersona');
-  if (sel) sel.innerHTML = '<option value=""></option>';
-
-  for (const p of catalogo) {
-    catalogIndex[p.ID] = p;
-    if (sel) {
-      const opt = document.createElement('option');
-      opt.value = String(p.ID);
-      opt.textContent = p.Nombre || '';
-      sel.appendChild(opt);
+async function loadCatalog(force = false) {
+  try {
+    if (!force && Array.isArray(STATE.catalogPersonas) && STATE.catalogPersonas.length) {
+      return STATE.catalogPersonas;
     }
+
+    const rows = await apiGet('/api/catalog'); // tu endpoint actual
+    STATE.catalogPersonas = Array.isArray(rows) ? rows : [];
+
+    // Reconstruye el índice ID -> persona
+    window.catalogIndex = {};
+    for (const p of STATE.catalogPersonas) {
+      if (p.ID != null) {
+        catalogIndex[String(p.ID)] = p;
+      }
+    }
+
+    // Si tienes un render del combo/personas, llámalo aquí:
+    if (typeof renderPersonasSelect === 'function') {
+      renderPersonasSelect(STATE.catalogPersonas);
+    }
+
+    return STATE.catalogPersonas;
+  } catch (e) {
+    console.error('Error al cargar catálogo:', e);
+    STATE.catalogPersonas = [];
+    window.catalogIndex = {};
+    if (typeof renderPersonasSelect === 'function') {
+      renderPersonasSelect([]);
+    }
+    return [];
   }
-  const rol = $('#inpRol'); if (rol) rol.value = '';
 }
 
 async function loadActores() {
@@ -547,45 +563,88 @@ document.addEventListener('click', async (e) => {
 
     return;
   }
+// ========== CREAR INVITACIÓN ==========
+if (btn.id === 'btnCrear') {
+  await withBusy(btn, async () => {
+    const fFecha = ($('#cFecha').value || '').trim();
+    const fHora  = ($('#cHora').value  || '').trim();
+    const evento = ($('#cEvento').value || '').trim();
+    const cargo  = ($('#cConvocaCargo').value || '').trim();
+    const partido= ($('#cPartido').value || '').trim();
+    const muni   = ($('#cMuni').value || '').trim();
+    const lugar  = ($('#cLugar').value || '').trim();
+    const obs    = ($('#cObs').value || '').trim();
+    const subTipo= ($('#cSubTipo').value || '').trim();
+    const actorId= ($('#cActor')?.value || '').trim();
 
-  // ========== CREAR INVITACIÓN ==========
-  if (btn.id === 'btnCrear') {
-    await withBusy(btn, async () => {
-      const fFecha = ($('#cFecha').value || '').trim();   // 👈 NECESARIO
-      const fd = new FormData();
-      fd.append('fecha', fFecha);
-      fd.append('hora',  ($('#cHora').value || '').trim());
-      fd.append('evento', ($('#cEvento').value || '').trim());
-      fd.append('convoca_cargo', ($('#cConvocaCargo').value || '').trim());
-      fd.append('partido_politico', ($('#cPartido').value || '').trim());
-      fd.append('municipio', ($('#cMuni').value || '').trim());
-      fd.append('lugar', ($('#cLugar').value || '').trim());
-      fd.append('observaciones', ($('#cObs').value || '').trim());
-      const actorId = ($('#cActor')?.value || '').trim();
-      if (actorId) fd.append('actor_id', actorId);
+    // Validaciones básicas
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fFecha)) { alert('Fecha inválida (usa AAAA-MM-DD)'); return; }
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(fHora)) { alert('Hora inválida (usa HH:MM)'); return; }
+    if (!actorId || !/^\d+$/.test(actorId)) { alert('Selecciona un actor válido'); return; }
 
-      const file = $('#cArchivo')?.files?.[0];
-      if (file) fd.append('archivo', file);
+    const fd = new FormData();
+    fd.append('fecha', fFecha);
+    fd.append('hora',  fHora);
+    fd.append('evento', evento);
+    fd.append('convoca_cargo', cargo);
+    fd.append('partido_politico', partido);
+    fd.append('municipio', muni);
+    fd.append('lugar', lugar);
+    fd.append('observaciones', obs);
 
-      const oblig = ['fecha','hora','evento','convoca_cargo','municipio','lugar','actor_id'];
-      const faltan = oblig.filter(k => !fd.get(k));
-      if (faltan.length) { alert('Faltan: ' + faltan.join(', ')); return; }
+    if (subTipo) fd.set('sub_tipo', subTipo);
 
-      const res = await fetch('/api/invitation/create', { method:'POST', credentials:'same-origin', body: fd });
-      if (!res.ok) {
-        let t = `${res.status} ${res.statusText}`; try { const j = await res.json(); if (j?.error) t = j.error; } catch {}
-        throw new Error(t);
+    // Grupo
+    const chkVinc = document.getElementById('cVincular');
+    const inpGrupo = document.getElementById('cGrupoToken');
+
+    if (chkVinc?.checked) {
+      let gt = (inpGrupo?.value || '').trim();
+      if (!gt) {
+        // Genera uno nuevo la primera vez
+        gt = 'GRP-' + Math.random().toString(36).slice(2, 10).toUpperCase();
+        if (inpGrupo) inpGrupo.value = gt;
       }
-      bootstrap.Modal.getInstance($('#modalCreate'))?.hide();
-    
-      // 🔄 datos frescos
-      await reloadUI();
+      fd.set('grupo_token', gt);
+      LAST_GROUP_TOKEN = gt;  // recordamos el último grupo usado
+    }
 
-      // 🔁 repinta calendario y selecciona la fecha creada
-      refreshCalendarUI({ preserve: true, hintDate: fFecha });
+    fd.append('actor_id', actorId);
+
+    const file = $('#cArchivo')?.files?.[0];
+    if (file) fd.append('archivo', file);
+
+    // Refuerzo de obligatorios
+    const oblig = ['fecha','hora','evento','convoca_cargo','municipio','lugar','actor_id'];
+    const faltan = oblig.filter(k => !fd.get(k));
+    if (faltan.length) { alert('Faltan: ' + faltan.join(', ')); return; }
+
+    const res = await fetch('/api/invitation/create', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd
     });
-    return;
-  }
+    if (!res.ok) {
+      let t = `${res.status} ${res.statusText}`;
+      try { const j = await res.json(); if (j?.error) t = j.error; } catch {}
+      throw new Error(t);
+    }
+
+    // Cierra modal
+    bootstrap.Modal.getInstance($('#modalCreate'))?.hide();
+
+    // Limpia form
+    resetCreateForm?.();
+
+    // datos frescos y repinta calendario en la fecha creada
+    await reloadUI();
+    refreshCalendarUI({ preserve: true, hintDate: fFecha });
+  });
+  return;
+}
+
+
+
 
     // ========== EDITAR (ABRIR) ==========
   if (btn.dataset.action === 'edit-inv') {
@@ -1197,7 +1256,10 @@ if (btn.id === 'btnAsignarGuardar') {
   const comentario = (document.getElementById('inpComentario')?.value || '').trim();
   const actorSel   = (document.getElementById('selActor')?.value || '').trim();
 
-  if (!currentId) { alert('No hay invitación seleccionada.'); return; }
+  if (!currentId) { 
+    alert('No hay invitación seleccionada.'); 
+    return; 
+  }
 
   await withBusy(btn, async () => {
     try {
@@ -1213,10 +1275,31 @@ if (btn.id === 'btnAsignarGuardar') {
 
       await apiPost('/api/assign', payload);
 
-      // cerrar modal y refrescar UI
-      bootstrap.Modal.getInstance(modalEl)?.hide();
-      refreshCalendarUI({ preserve: true, hintDate: fFecha });
+      // 1) Recargar datos frescos
       await reloadUI();
+
+      // 2) Calcular fecha de esa invitación recargada para que el calendario
+      //    se quede en el día correcto
+      const inv = (STATE.invitaciones || []).find(x => x.ID === currentId);
+      const fechaHint = inv?.Fecha || null;
+
+      // 3) Refrescar calendario (manteniendo filtros y, si se puede, la fecha)
+      refreshCalendarUI({ preserve: true, hintDate: fechaHint });
+
+      // 4) Si tienes algo tipo "mostrar tarjeta actual" la puedes llamar aquí
+      if (typeof showInvitationCard === 'function') {
+        showInvitationCard(currentId);
+      }
+
+      // 5) Cerrar modal al final
+      bootstrap.Modal.getInstance(modalEl)?.hide();
+
+      // 6) Ocultar mensaje de error si había
+      if (msgEl) {
+        msgEl.textContent = '';
+        msgEl.classList.add('d-none');
+      }
+
     } catch (err) {
       console.error(err);
       if (msgEl) {
@@ -1230,6 +1313,7 @@ if (btn.id === 'btnAsignarGuardar') {
 
   return;
 }
+
 
 // ========== ELIMINAR INVITACIÓN ==========
 if (btn.dataset.action === 'delete-inv') {
@@ -1321,24 +1405,28 @@ if (btn.dataset.action === 'delete-inv') {
     return;
   }
 
-  // === Abrir modal "Eliminar persona"
+// === Abrir modal "Eliminar persona"
   if (btn.id === 'btnDeletePersonaInline' || btn.dataset.action === 'delete-persona') {
     const pid = document.getElementById('selPersona')?.value || btn.dataset.id || '';
     if (!pid) { alert('Selecciona una persona primero'); return; }
+
     const p = catalogIndex?.[pid];
     if (!p) { alert('Persona no encontrada'); return; }
 
     $('#delPersonaId').value = p.ID;
     $('#delPersonaName').textContent = p.Nombre || 'esta persona';
     $('#delPersonaMsg').classList.add('d-none');
+
     new bootstrap.Modal($('#modalDeletePersona')).show();
+    // ❌ NO LLAMES reloadUI AQUÍ
     return;
   }
 
   // === Confirmar eliminación de persona
   if (btn.id === 'btnEliminarPersonaConfirm') {
     const msgEl = $('#delPersonaMsg');
-    msgEl.classList.add('d-none'); msgEl.textContent = '';
+    msgEl.classList.add('d-none');
+    msgEl.textContent = '';
 
     const pid = ($('#delPersonaId').value || '').trim();
     if (!pid) {
@@ -1357,28 +1445,36 @@ if (btn.dataset.action === 'delete-inv') {
       const j = await res.json();
       if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
 
+      // Cierra modal
       bootstrap.Modal.getInstance($('#modalDeletePersona'))?.hide();
-      await loadCatalog();
-      await reloadUI();
-      alert('Persona eliminada.');
-      // Deja el select vacío y limpia el Rol
+
+      // 🔄 Recarga catálogo FORZANDO desde backend
+      await loadCatalog(true);
+
+      // Limpia select principal
       const sel = document.getElementById('selPersona');
       if (sel) {
         sel.value = '';
         sel.dispatchEvent(new Event('change')); // para que se limpie inpRol con tu lógica existente
       }
+
       if (document.getElementById('inpRol')) {
         document.getElementById('inpRol').value = '';
       }
 
-      // Si usas TomSelect para personas, límpialo también
+      // Si usas TomSelect para personas
       if (window.personaTS) {
         try {
-          window.personaTS.clear(true);       // sin disparar onChange extra
-          window.personaTS.refreshOptions(false);
-        } catch {}
+          window.personaTS.clear(true);          // limpia valor
+          window.personaTS.refreshOptions(false); // refresca opciones
+        } catch (e) {
+          console.warn('Error refrescando TomSelect:', e);
+        }
       }
+
+      alert('Persona eliminada.');
     } catch (e) {
+      console.error(e);
       msgEl.textContent = e.message || 'No se pudo eliminar.';
       msgEl.classList.remove('d-none');
     }
@@ -1436,6 +1532,23 @@ if (btn.dataset.action === 'delete-inv') {
     }
     return;
   }
+  // Botón "Ver grupo" en la lista del día
+  if (btn.classList.contains('btn-ver-grupo')) {
+    const token = btn.dataset.grupo || '';
+    if (!token) return;
+
+    // 1) Resalta en la lista del día (solo las tarjetas visibles hoy)
+    const items = document.querySelectorAll('#calDayList .day-item');
+    items.forEach(el => {
+      const g = el.dataset.grupo || '';
+      if (g === token) el.classList.add('group-focus');
+      else el.classList.remove('group-focus');
+    });
+
+    // 2) Abre el modal con todas las invitaciones del grupo (cualquier fecha)
+    renderGroupModal(token);
+    return;
+  }
 });
 
 async function withBusy(btn, fn) {
@@ -1487,11 +1600,11 @@ window.addEventListener('load', adjustMainPadding);
 window.addEventListener('resize', adjustMainPadding);
 
 // ===== DOM Ready =====
-document.addEventListener('DOMContentLoaded', async ()=>{
+document.addEventListener('DOMContentLoaded', async () => {
   try {
     await Promise.all([ loadCatalog(), loadActores(), loadSexos(), loadPartidos() ]);
-    await reloadUI(); // ← ÚNICO render/petición de invitaciones
-    refreshCalendarUI({ preserve: true }); // mantiene el día seleccionado
+    await reloadUI();
+    refreshCalendarUI({ preserve: true });
     renderCalendarModule();
   } catch (err) {
     console.error(err);
@@ -1507,9 +1620,40 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     });
     modalCreate.addEventListener('hidden.bs.modal', resetCreateForm);
   }
-});
-// ===== Logout (usa endpoint nuevo) =====
-document.addEventListener("DOMContentLoaded", () => {
+
+  // ==== Vincular / Grupo ====
+  const chkVinc = document.getElementById('cVincular');
+  const rowGrupo = document.getElementById('cGrupoRow');
+  const inpGrupo = document.getElementById('cGrupoToken');
+
+  if (chkVinc && rowGrupo && inpGrupo) {
+    chkVinc.addEventListener('change', e => {
+      if (e.target.checked) {
+        rowGrupo.style.display = '';
+        // Si hay último grupo usado y el campo está vacío, lo proponemos
+        if (LAST_GROUP_TOKEN && !inpGrupo.value.trim()) {
+          inpGrupo.value = LAST_GROUP_TOKEN;
+        }
+      } else {
+        rowGrupo.style.display = 'none';
+        inpGrupo.value = '';
+      }
+    });
+  }
+
+  // ==== Auto sub-tipo según texto de evento ====
+  const selEvento = document.getElementById('cEvento');
+  const selSub = document.getElementById('cSubTipo');
+  if (selEvento && selSub) {
+    selEvento.addEventListener('change', e => {
+      const val = (e.target.value || '').toLowerCase();
+      if (val.includes('en cabildo y al público'))      selSub.value = 'mixto';
+      else if (val.includes('en cabildo'))              selSub.value = 'pre';
+      else if (val.includes('al público'))              selSub.value = 'publico';
+      else selSub.value = '';
+    });
+  }
+  // ===== Logout (usa endpoint nuevo) =====
   const btnLogout = document.getElementById("btnLogout");
   if (!btnLogout) return;
   btnLogout.addEventListener("click", async () => {
@@ -1521,6 +1665,7 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Error al cerrar sesión: " + (err.message || ""));
     }
   });
+
 });
 
 // ===== Preview archivo crear =====
@@ -1569,14 +1714,7 @@ function renderActoresCombos() {
   const selActor = document.getElementById('selActor'); // si tienes otro combo de actores
   if (selActor) selActor.innerHTML = html;
 }
-// Usando evento de Bootstrap al mostrar el modal:
-const modalCreateEl = document.getElementById('modalCreate');
-if (modalCreateEl) {
-  modalCreateEl.addEventListener('show.bs.modal', async () => {
-    await loadActores(true);
-    await fillPartidos?.();
-  }, { once: true });
-}
+
 
 // Si abres con un botón:
 document.getElementById('btnAddInvitacion')?.addEventListener('click', async () => {
@@ -1591,11 +1729,6 @@ document.getElementById('modalCreate')?.addEventListener('show.bs.modal', async 
   if (typeof loadActores === 'function') await loadActores(true);
   if (typeof fillPartidos === 'function') await fillPartidos();
 });
-
-// ===== Estado
-window.STATE = window.STATE || {};
-STATE.invitaciones = [];
-
 
 
 // ===== Utilidades
@@ -1902,9 +2035,13 @@ function renderDayList(dateYMD){
     return;
   }
 
+  // Orden por hora
   items.sort((a,b) => (a.Hora||'') < (b.Hora||'') ? -1 : 1);
 
-  const badge = (st) => {
+  // Mapa grupo_token → clase de color
+  const groupClassCache = {};
+
+  const badgeEstatus = (st) => {
     st = (st||'').toLowerCase();
     if (st.includes('confirm')) return '<span class="badge text-bg-success">Confirmado</span>';
     if (st.includes('cancel'))  return '<span class="badge text-bg-danger">Cancelado</span>';
@@ -1912,20 +2049,60 @@ function renderDayList(dateYMD){
     return '<span class="badge text-bg-warning text-dark">Pendiente</span>';
   };
 
+  const badgeSubTipo = (sub) => {
+    sub = (sub||'').toLowerCase();
+    if (sub === 'pre')     return '<span class="badge rounded-pill bg-primary-subtle text-primary-emphasis ms-1">Pre</span>';
+    if (sub === 'publico') return '<span class="badge rounded-pill bg-warning-subtle text-warning-emphasis ms-1">Público</span>';
+    if (sub === 'mixto')   return '<span class="badge rounded-pill bg-success-subtle text-success-emphasis ms-1">Mixto</span>';
+    return '';
+  };
+
   box.innerHTML = items.map(x => {
-    const hora = x.Hora ? ` · ${x.Hora}` : '';
-    const asignado = x.PersonaNombre ? ` — <span class="text-muted">${x.PersonaNombre}${x.Rol? ' ('+x.Rol+')':''}</span>` : '';
-    const partido = (x.Partido || x.PartidoPolitico || x.Partido_Politico) ? 
+    const hora      = x.Hora ? ` · ${x.Hora}` : '';
+    const asignado  = x.PersonaNombre ? 
+      ` — <span class="text-muted">${x.PersonaNombre}${x.Rol? ' ('+x.Rol+')':''}</span>` : '';
+    const partido   = (x.Partido || x.PartidoPolitico || x.Partido_Politico) ? 
       `<span class="badge rounded-pill text-bg-light ms-1">${x.Partido || x.PartidoPolitico || x.Partido_Politico}</span>` : '';
 
+    const grupoTok  = x.GrupoToken || x.grupo_token || '';
+    const subTipo   = x.SubTipo || x.sub_tipo || '';
+    const grpClass  = getGroupClass(grupoTok, groupClassCache);
+
+    // Si tiene grupo → badge + botón
+    const grupoBadge = grupoTok
+      ? `<span class="badge bg-dark-subtle text-dark-emphasis me-1">Grupo</span>`
+      : '';
+
+    const btnGrupo = grupoTok
+      ? `<button class="btn btn-sm btn-outline-secondary ms-1 btn-ver-grupo" data-grupo="${grupoTok}">
+           Ver grupo
+         </button>`
+      : '';
+
     return `
-      <div class="day-item d-flex align-items-start justify-content-between">
+      <div class="day-item d-flex align-items-start justify-content-between ${grpClass}" 
+           data-id="${x.ID}" 
+           data-grupo="${grupoTok}">
         <div class="me-2">
-          <div class="title">${(x.Evento || 'Sin título')} ${partido}</div>
-          <div class="meta"><i class="bi bi-geo-alt me-1"></i>${x.Municipio || ''} · ${x.Lugar || ''}${hora}</div>
-          <div class="meta"><i class="bi bi-megaphone me-1"></i><b>Convoca:</b> ${x.ActorNombre || x.Convoca || '—'}</div>
-          <div class="meta"><i class="bi bi-person-check me-1"></i><b>Asignado:</b> ${asignado || ' — '}</div>
-          <div class="tags mt-1">${badge(x.Estatus || '')}</div>
+          <div class="title">
+            ${(x.Evento || 'Sin título')} 
+            ${partido}
+            ${badgeSubTipo(subTipo)}
+          </div>
+          <div class="meta">
+            <i class="bi bi-geo-alt me-1"></i>${x.Municipio || ''} · ${x.Lugar || ''}${hora}
+          </div>
+          <div class="meta">
+            <i class="bi bi-megaphone me-1"></i><b>Convoca:</b> ${x.ActorNombre || x.Convoca || '—'}
+          </div>
+          <div class="meta">
+            <i class="bi bi-person-check me-1"></i><b>Asignado:</b> ${asignado || ' — '}
+          </div>
+          <div class="tags mt-1">
+            ${badgeEstatus(x.Estatus || '')}
+            ${grupoBadge}
+            ${btnGrupo}
+          </div>
         </div>
         <div class="ms-2">
           <button class="btn btn-outline-primary btn-goto" data-action="goto-inv" data-id="${x.ID}">
@@ -1935,12 +2112,30 @@ function renderDayList(dateYMD){
       </div>
     `;
   }).join('');
+  
       // asegura que tenga scroll
   box.classList.add('day-list');
 
   // cada vez que se renderiza, vuelve al inicio
   box.scrollTop = 0;
 }
+
+// Colores por grupo
+const GROUP_CLASSES = ['grp-a', 'grp-b', 'grp-c', 'grp-d', 'grp-e', 'grp-f'];
+
+function getGroupClass(token, cache) {
+  if (!token) return '';
+  cache = cache || {};
+  if (cache[token]) return cache[token];
+
+  const used = Object.keys(cache).length;
+  const idx = used % GROUP_CLASSES.length;
+
+  const cls = GROUP_CLASSES[idx];
+  cache[token] = cls;
+  return cls;
+}
+
 
 // ===== Navegación de mes =====
 document.getElementById('calPrev')?.addEventListener('click', () => {
@@ -2545,3 +2740,98 @@ async function pollInvitaciones() {
 // Inicia: primera corrida “full” (sin since)
 pollInvitaciones();
 setInterval(pollInvitaciones, 15000); // cada 15s (ajusta si quieres)
+
+function renderGroupModal(grupoToken) {
+  const modalEl = document.getElementById('modalGrupo');
+  const body    = document.getElementById('grupoBody');
+  const title   = document.getElementById('grupoTitle');
+  if (!modalEl || !body || !title) return;
+
+  const all = Array.isArray(STATE.invitaciones) ? STATE.invitaciones : [];
+
+  // Filtra TODAS las invitaciones de ese grupo (sin importar la fecha)
+  const list = all.filter(x => {
+    const tok = (x.GrupoToken || x.grupo_token || '').trim();
+    return tok && tok === grupoToken;
+  });
+
+  if (!list.length) {
+    title.textContent = 'Eventos vinculados';
+    body.innerHTML = '<div class="text-muted small">No se encontraron eventos para este grupo.</div>';
+  } else {
+    // Ordena por fecha + hora
+    list.sort((a, b) => {
+      const fa = (a.Fecha || '');
+      const fb = (b.Fecha || '');
+      if (fa < fb) return -1;
+      if (fa > fb) return  1;
+      const ha = (a.Hora || '');
+      const hb = (b.Hora || '');
+      return ha.localeCompare(hb);
+    });
+
+    title.textContent = `Eventos vinculados (${list.length})`;
+
+    const html = list.map(x => {
+      const fechaTxt = (x.Fecha || '').split('-').reverse().join('/') || '—';
+      const horaTxt  = x.Hora || '—';
+      const muni     = x.Municipio || '';
+      const lugar    = x.Lugar || '';
+      const evento   = x.Evento || 'Sin título';
+      const estatus  = x.Estatus || '';
+      const actor    = x.ActorNombre || x.Convoca || '—';
+      const persona  = x.PersonaNombre || '—';
+      const rol      = x.Rol || '';
+
+      const subTipo  = (x.SubTipo || x.sub_tipo || '').toLowerCase();
+      let badgeTipo = '';
+      if (subTipo === 'pre')      badgeTipo = '<span class="badge bg-primary-subtle text-primary-emphasis ms-1">Pre</span>';
+      else if (subTipo === 'publico') badgeTipo = '<span class="badge bg-warning-subtle text-warning-emphasis ms-1">Público</span>';
+      else if (subTipo === 'mixto')   badgeTipo = '<span class="badge bg-success-subtle text-success-emphasis ms-1">Mixto</span>';
+
+      const est = estatus.toLowerCase();
+      let badgeEst = '<span class="badge text-bg-warning text-dark">Pendiente</span>';
+      if (est.includes('confirm')) badgeEst = '<span class="badge text-bg-success">Confirmado</span>';
+      else if (est.includes('cancel'))  badgeEst = '<span class="badge text-bg-danger">Cancelado</span>';
+      else if (est.includes('sustit'))  badgeEst = '<span class="badge text-bg-info">Sustituido</span>';
+
+      return `
+        <div class="border rounded p-2 mb-2">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="fw-semibold">${evento} ${badgeTipo}</div>
+              <div class="text-muted small">
+                <i class="bi bi-calendar-event me-1"></i>${fechaTxt} · ${horaTxt}
+              </div>
+              <div class="text-muted small">
+                <i class="bi bi-geo-alt me-1"></i>${muni} · ${lugar}
+              </div>
+              <div class="text-muted small">
+                <i class="bi bi-megaphone me-1"></i><b>Convoca:</b> ${actor}
+              </div>
+              <div class="text-muted small">
+                <i class="bi bi-person-check me-1"></i><b>Asignado:</b> ${persona}${rol ? ' ('+rol+')' : ''}
+              </div>
+              <div class="mt-1">${badgeEst}</div>
+            </div>
+            <div class="ms-2">
+              <button class="btn btn-sm btn-outline-primary btn-goto" 
+                      data-action="goto-inv" 
+                      data-id="${x.ID}">
+                Ver tarjeta
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    body.innerHTML = html;
+  }
+
+  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+  modal.show();
+}
+
+
+
