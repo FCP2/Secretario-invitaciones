@@ -112,6 +112,8 @@ class Invitacion(Base):
     archivo_mime         = Column(Text)
     archivo_tamano       = Column(Integer)
     archivo_ts           = Column(DateTime)
+    grupo_token          = Column(Text)
+    sub_tipo             = Column(Text)
 
     __table_args__ = (
         Index("idx_invitaciones_estatus", "estatus"),
