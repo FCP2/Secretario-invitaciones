@@ -74,7 +74,9 @@ class Persona(Base):
     particular_nombre = Column(Text)
     particular_cargo  = Column(Text)
     particular_tel    = Column(Text)
-
+     # ... lo que ya tienes ...
+    region_id         = Column(Integer, ForeignKey("regiones.id", ondelete="SET NULL"))
+    region        = relationship("Region", back_populates="personas")
     sexo          = relationship("Sexo")
     invitaciones  = relationship("Invitacion", back_populates="persona", lazy="selectin")
 
@@ -167,3 +169,24 @@ class Notificacion(Base):
         Index("idx_notif_ts", "ts"),
         Index("idx_notif_inv_id", "invitacion_id"),
     )
+    
+class Region(Base):
+    __tablename__ = "regiones"
+
+    id    = Column(Integer, primary_key=True)
+    nombre = Column(Text, nullable=False)
+    slug   = Column(Text, unique=True)
+    color  = Column(Text)   # opcional (para mapita / badges)
+
+    municipios = relationship("RegionMunicipio", back_populates="region", lazy="joined")
+    personas   = relationship("Persona", back_populates="region", lazy="selectin")
+
+
+class RegionMunicipio(Base):
+    __tablename__ = "region_municipios"
+
+    id        = Column(Integer, primary_key=True)
+    region_id = Column(Integer, ForeignKey("regiones.id", ondelete="CASCADE"), nullable=False)
+    municipio = Column(Text, nullable=False)  # usa el nombre canónico tal como lo valida VALID_MUNICIPIOS
+
+    region = relationship("Region", back_populates="municipios")
