@@ -1,5 +1,3 @@
-// main.js — versión alineada con backend Postgres (Persona + Actor + endpoints vigentes)
-
 // ===== Estado global =====
 let catalogo = [];          // personas [{ID, Nombre, Cargo, ...}]
 let catalogIndex = {};      // índice por ID -> persona
@@ -477,60 +475,433 @@ function initPersonaTomSelect(modalEl, inv) {
 let _removeFile = false;
 
 document.addEventListener('click', async (e) => {
+  
   const btn = e.target.closest('button');
   if (!btn) return;
 
-  // ========== GESTIONAR ==========
-  if (btn.dataset.action === 'assign' || btn.dataset.action === 'manage') {
-    currentId = btn.dataset.id;
-    const inv = invIndex[currentId] || {};
-    const metaEl = document.getElementById('assignMeta');
-    if (metaEl) metaEl.textContent = `${inv.Evento || ''} — ${getFecha(inv)} ${getHora(inv)}`;
+// ======== GESTIONAR (abrir modal de asignación) ========
+if (btn.dataset.action === 'assign' || btn.dataset.action === 'manage') {
+  currentId = btn.dataset.id;
+  const inv = invIndex[currentId] || {};
 
+  const metaEl = document.getElementById('assignMeta');
+  if (metaEl) metaEl.textContent = `${inv.Evento || ''} — ${getFecha(inv)} ${getHora(inv)}`;
+
+  if ($('#inpRol')) $('#inpRol').value = '';
+  if ($('#inpComentario')) $('#inpComentario').value = '';
+
+  const modalAssignEl = document.getElementById('modalAssign');
+  if (!modalAssignEl) { console.warn('No existe #modalAssign'); return; }
+
+  /** -------------------------------------------------------------
+   * LISTENER PRINCIPAL: SHOWN DEL MODAL
+   * Se ejecuta SOLO UNA VEZ por sesión.
+   * --------------------------------------------------------------*/
+  modalAssignEl.addEventListener('shown.bs.modal', async () => {
+
+    /* =========================
+       HELPERS / UTILITIES
+    ==========================*/
+    const normalizeMunicipioKey = s => (String(s || '').trim()
+      .replace(/\s+/g,' ')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .toLowerCase()
+    );
+
+    // renderRegionPersonas fallback (si no tienes una global compatible)
+    function renderRegionPersonasLocal(regionId, personsArray) {
+      try {
+        const sel = document.getElementById('regPersona');
+        if (!sel) return;
+        sel.innerHTML = ['<option value="">— Seleccione —</option>']
+          .concat((personsArray || []).map(p => {
+            const id = p.ID ?? p.id ?? '';
+            const nombre = (p.Nombre ?? p.nombre ?? '') || '';
+            const cargo = (p.Cargo ?? p.cargo) ? ' — ' + (p.Cargo ?? p.cargo) : '';
+            const data = encodeURIComponent(JSON.stringify(p || {}));
+            return `<option data-meta="${data}" value="${id}">${nombre}${cargo}</option>`;
+          }))
+          .join('');
+      } catch (e) { console.warn('renderRegionPersonasLocal fallo', e); }
+    }
+
+    const safeRenderRegionPersonas = (regionId, personsArray) => {
+      try {
+        if (typeof renderRegionPersonas === 'function') {
+          try { renderRegionPersonas(regionId, personsArray); return; } catch(e){ console.warn('renderRegionPersonas custom fallo', e); }
+        }
+      } catch(e){}
+      renderRegionPersonasLocal(regionId, personsArray);
+    };
+
+    const localSetRegionAndPersons = (regionIdLocal, personsArray) => {
+      if (!window.REGION_MODULE) window.REGION_MODULE = { personasPorRegion: {} };
+      window.REGION_MODULE.personasPorRegion[String(regionIdLocal)] = personsArray || [];
+      const regSel = document.getElementById('regRegion');
+      if (regSel) regSel.value = String(regionIdLocal);
+      try { safeRenderRegionPersonas(String(regionIdLocal), personsArray); } catch (e) { console.warn(e); }
+      try { new bootstrap.Tab(document.querySelector('#tab-region-tab')).show(); } catch (e) {}
+    };
+
+    // Asegura mapa + features + polygonsLayer y opcionalmente pinta una región
+    async function ensureMapReadyAndShowRegion(regionIdToShow = null) {
+      try {
+        const mod = window.MUNICIPIOS_MODULE;
+        if (!mod) {
+          if (typeof bootstrapMunicipiosAndMap === 'function') {
+            try { await bootstrapMunicipiosAndMap(); } catch(e){ console.warn('bootstrapMunicipiosAndMap fallback falló', e); }
+          }
+        }
+        const Mmod = window.MUNICIPIOS_MODULE || mod;
+        if (!Mmod) return;
+
+        // cargar features si faltan
+        if (!(Mmod.features && Mmod.features.length)) {
+          try { await Mmod.loadMunicipiosJson(Mmod.MUNICIPIOS_URL || '/static/municipios.json'); }
+          catch(e){ console.warn('ensure: loadMunicipiosJson fallo', e); }
+        }
+
+        // init map si hace falta
+        if (!Mmod.map) {
+          try { Mmod.initMunicipiosMap && Mmod.initMunicipiosMap('regMap'); }
+          catch(e){ console.warn('ensure: initMunicipiosMap fallo', e); }
+        }
+
+        // crear polygonsLayer si no existe
+        if (!Mmod.polygonsLayer && Mmod.map) {
+          try {
+            Mmod.polygonsLayer = L.geoJSON(null, {
+              style: (feature)=>({ color:'#0b5ed7', weight:1, fillOpacity:0.35 }),
+              onEachFeature: (f, layer) => {
+                const name = (f.properties && f.properties.municipio) ? f.properties.municipio : 'Municipio';
+                layer.bindTooltip(name, { sticky:true });
+              }
+            }).addTo(Mmod.map);
+          } catch(e){ console.warn('ensure: crear polygonsLayer fallo', e); }
+        }
+
+        // añadir featureCollection en bloque si no hay sublayers
+        try {
+          let layerCount = 0;
+          Mmod.polygonsLayer?.eachLayer(()=> layerCount++);
+          if (!layerCount && Mmod.featureCollection) {
+            if (typeof Mmod.safeAddGeoJSON === 'function') {
+              await Mmod.safeAddGeoJSON(Mmod.polygonsLayer, Mmod.featureCollection);
+            } else {
+              const tmp = L.geoJSON(Mmod.featureCollection);
+              tmp.eachLayer(l => Mmod.polygonsLayer.addLayer(l));
+            }
+          }
+        } catch(e){ console.warn('ensure: añadir featureCollection fallo', e); }
+
+        // mostrar región solicitada
+        if (regionIdToShow) {
+          try {
+            if (typeof Mmod.showMunicipiosForRegion === 'function') {
+              Mmod.showMunicipiosForRegion(regionIdToShow);
+            } else if (typeof window.showMunicipiosForRegion === 'function') {
+              window.showMunicipiosForRegion(regionIdToShow);
+            }
+          } catch(e){ console.warn('ensure: showMunicipiosForRegion fallo', e); }
+        }
+
+        // forzar invalidateSize por si el contenedor estaba oculto
+        try { setTimeout(()=> { Mmod.map && Mmod.map.invalidateSize && Mmod.map.invalidateSize(); }, 120); } catch(e){}
+      } catch(e) {
+        console.warn('ensureMapReadyAndShowRegion error', e);
+      }
+    }
+
+    /* =====================================================
+       1) INICIALIZAR REGIONES + MUNICIPIOS (temprano)
+    ======================================================*/
+    try {
+      try { await bootstrapRegionCache(); } catch(e){ console.warn('bootstrapRegionCache falló:', e); }
+      await ensureMapReadyAndShowRegion(null);
+    } catch (e) {
+      console.warn('Error inicializando módulos región/municipios:', e);
+    }
+
+    /* =====================================================
+       2) CARGA DE CATÁLOGOS
+    ======================================================*/
+    try { await Promise.all([ loadPersonas(true), loadActores(true), loadSexos() ]); }
+    catch(e){ console.warn('Catálogos fallaron parcialmente:', e); }
+
+    /* =====================================================
+       3) SELECT PERSONA (TomSelect)
+    ======================================================*/
+    try {
+      let list = window.STATE?.personas?.length ? window.STATE.personas.slice()
+            : window.STATE?.catalogPersonas?.length ? window.STATE.catalogPersonas.slice()
+            : [];
+
+      if (!list.length) {
+        try {
+          const cat = await apiGet('/api/catalog');
+          list = Array.isArray(cat?.personas) ? cat.personas : (Array.isArray(cat) ? cat : []);
+        } catch(e){ /* ignore */ }
+      }
+
+      const selPersona = modalAssignEl.querySelector('#selPersona');
+      if (selPersona) {
+        selPersona.innerHTML = [
+          '<option value="">— Sin asignar —</option>',
+          ...list.map(p => {
+            const id = p.ID ?? p.id ?? '';
+            const nombre = (p.Nombre ?? p.nombre ?? '').replace(/</g,'&lt;');
+            const cargo = p.Cargo ?? p.cargo ?? '';
+            return `<option value="${id}">${nombre}${cargo ? ' — '+cargo : ''}</option>`;
+          })
+        ].join('');
+
+        if (window.personaTS) try { window.personaTS.destroy(); } catch(e){ console.warn(e); }
+        window.personaTS = new TomSelect(selPersona, {
+          searchField:['text'],
+          dropdownParent:modalAssignEl.querySelector('.modal-content'),
+          openOnFocus:true, allowEmptyOption:true, maxOptions:1000
+        });
+
+        const personaId = inv.PersonaID ? String(inv.PersonaID) : '';
+        if (personaId) try { window.personaTS.setValue(personaId, true); } catch(e){ /* ignore */ }
+
+        setTimeout(()=> {
+          const ci = window.personaTS?.control_input;
+          if (ci) ci.setAttribute('placeholder','Escribe para buscar representante…');
+        },40);
+      }
+    } catch(e){ console.warn('Error inicializando select persona:', e); }
+
+    /* =====================================================
+       4) LIMPIEZAS UI
+    ======================================================*/
     if ($('#inpRol')) $('#inpRol').value = '';
     if ($('#inpComentario')) $('#inpComentario').value = '';
+    try { updatePersonaInlineButtons(); } catch (e) { console.warn(e); }
 
-    const modalAssignEl = document.getElementById('modalAssign');
-    modalAssignEl.addEventListener('shown.bs.modal', async function onShown(){
-      modalAssignEl.removeEventListener('shown.bs.modal', onShown);
+    /* =====================================================
+       5) INFERIR / OBTENER RÉGION SEGÚN MUNICIPIO y PINTAR
+    ======================================================*/
+    const muni = (inv.Municipio || inv.municipio || '').trim();
+    let regionId = null;
+
+    if (muni) {
       try {
-        await Promise.all([ loadPersonas(true), loadActores(true), loadSexos() ]);
-      } catch (err) {
-        console.warn('Catálogos (parcial):', err);
-      }
-      initPersonaTomSelect(modalAssignEl, inv);
+        const spinner = document.getElementById('regLoading');
+        if (spinner) spinner.classList.remove('d-none');
 
-      try { if (actorTS) actorTS.destroy(); } catch {}
-      actorTS = null;
-      if ($('#selActor')) {
-        actorTS = new TomSelect('#selActor', {
-          searchField: ['text'],
-          dropdownParent: modalAssignEl.querySelector('.modal-content'),
-          openOnFocus: false,
-          allowEmptyOption: true,
-          maxOptions: 1000
-        });
-        actorTS.on('type', (str) => { if (str && str.length >= 1) actorTS.open(); else actorTS.close(); });
-        actorTS.on('focus', () => actorTS.close());
-        if (inv.ActorID != null) actorTS.setValue(String(inv.ActorID), true);
-      }
+        let resp = null;
+        try { resp = await apiGet('/api/personas/recomendadas?municipio='+encodeURIComponent(muni)); }
+        catch(e){ console.warn('api/personas/recomendadas fallo', e); }
 
-      setTimeout(() => {
-        try {
-          if (window.personaTS?.control_input) {
-            window.personaTS.control_input.setAttribute('placeholder','Escribe para buscar…');
-            window.personaTS.control_input.focus();
+        if (spinner) spinner.classList.add('d-none');
+
+        const personasResp = resp?.personas ?? resp ?? [];
+        const regionIds = resp?.region_ids ?? (resp?.region_id ? [resp.region_id] : []);
+
+        if (Array.isArray(personasResp) && personasResp.length) {
+          regionId = regionIds.length ? String(regionIds[0]) : null;
+          if (regionId) {
+            if (typeof setRegionAndPersons === 'function') setRegionAndPersons(regionId, personasResp);
+            else localSetRegionAndPersons(regionId, personasResp);
           }
-        } catch {}
-      }, 40);
-      updatePersonaInlineButtons();
-    }, { once:true });
+        } else {
+          regionId = inferRegionIdByMunicipio(muni)
+            || window.REGION_MODULE?.muniToRegion?.[normalizeMunicipioKey(muni)]
+            || null;
 
-    new bootstrap.Modal(modalAssignEl).show();
-    return;
-  }
+          if (regionId) {
+            const cached = window.REGION_MODULE?.personasPorRegion?.[String(regionId)];
+            if (cached?.length) {
+              localSetRegionAndPersons(regionId, cached);
+            } else {
+              try {
+                const pr = await apiGet(`/api/regiones/${regionId}/personas`);
+                localSetRegionAndPersons(regionId, pr.personas || pr || []);
+              } catch(e){ console.warn('fetch personas por region falló', e); }
+            }
+          }
+        }
 
-  //ver detalles
+        // Pintar la región ya (fix principal)
+        try { if (regionId) await ensureMapReadyAndShowRegion(regionId); } catch(e){ console.warn('Error pintando región al abrir modal:', e); }
+      } catch(e){ console.warn('Error inferencia región por municipio:', e); }
+    }
+
+    /* =====================================================
+       6) RENDER PERSONA POR REGIÓN -> preview compacto + "Usar en general"
+           (preview SOLO en la pestaña región; NO actualizamos #personaInfo en General)
+    ======================================================*/
+    (function attachRegionPersonaHandlers() {
+      const regPersonaSel = document.getElementById('regPersona');
+      const regionPersonaInfoEl = document.getElementById('regionPersonaInfo');
+      const personaInfoEl = document.getElementById('personaInfo'); // lo dejamos por si necesitas algo, pero no lo actualizamos desde región
+      const selPersonaGlobal = document.getElementById('selPersona');
+      const inpRolEl = document.getElementById('inpRol');
+      const btnEditInline = document.getElementById('btnEditPersonaInline');
+      const btnDeleteInline = document.getElementById('btnDeletePersonaInline');
+
+      function renderSmallPreview(pObj, targetEl) {
+        if (!targetEl) return;
+        if (!pObj) {
+          targetEl.innerHTML = '<div class="text-muted small">Selecciona una persona para ver su información.</div>';
+          return;
+        }
+        const nombre = pObj.Nombre ?? pObj.nombre ?? '';
+        const cargo = pObj.Cargo ?? pObj.cargo ?? '';
+        const telefono = pObj.Telefono ?? pObj.telefono ?? pObj.Tel ?? '';
+        const correo = pObj.Email ?? pObj.email ?? pObj.Correo ?? '';
+        const foto = pObj.FotoURL ?? pObj.foto ?? pObj.Foto ?? '';
+
+        targetEl.innerHTML = `
+          <div class="d-flex align-items-start gap-2">
+            ${ foto ? `<img src="${foto}" alt="${nombre}" class="rounded" style="width:56px;height:56px;object-fit:cover">`
+                   : `<div class="rounded" style="width:56px;height:56px;background:#e9ecef;width:56px;height:56px"></div>` }
+            <div class="flex-fill">
+              <div class="fw-semibold small mb-1">${nombre}</div>
+              <div class="small text-muted mb-1">${cargo}</div>
+              <div class="small text-muted">${ telefono ? `<i class="bi bi-telephone-fill me-1"></i>${telefono}` : '' } ${ correo ? `<i class="bi bi-envelope-fill ms-2 me-1"></i>${correo}` : '' }</div>
+            </div>
+          </div>
+          <div class="mt-2 d-flex gap-2">
+            <button id="btnUsePersonaGeneral" class="btn btn-sm btn-primary">Usar en asignación general</button>
+          </div>
+        `;
+      }
+
+      if (regPersonaSel) {
+        regPersonaSel.addEventListener('change', (ev) => {
+          try {
+            const opt = ev.target.selectedOptions && ev.target.selectedOptions[0];
+            if (!opt) { renderSmallPreview(null, regionPersonaInfoEl); return; }
+            const meta = opt.getAttribute('data-meta');
+            let pObj = null;
+            if (meta) {
+              try { pObj = JSON.parse(decodeURIComponent(meta)); } catch(e){ pObj = null; }
+            }
+            if (!pObj) {
+              const personsCache = window.REGION_MODULE?.personasPorRegion || {};
+              const all = Object.values(personsCache).flat();
+              pObj = all.find(x => String(x.ID ?? x.id ?? '') === String(opt.value)) || null;
+            }
+            renderSmallPreview(pObj, regionPersonaInfoEl);
+
+            // attach buttons handlers
+            setTimeout(()=> {
+              const btnUse = document.getElementById('btnUsePersonaGeneral');
+              if (btnUse) {
+                btnUse.onclick = () => {
+                  try {
+                    if (!pObj) return;
+                    const personaId = pObj.ID ?? pObj.id ?? '';
+                    if (!personaId) return;
+
+                    // 1) setear TomSelect si existe (y triggerear sus listeners)
+                    if (window.personaTS && typeof window.personaTS.setValue === 'function') {
+                      try { window.personaTS.setValue(String(personaId), true); } catch(e){ console.warn('personaTS.setValue fallo', e); }
+                    } else if (selPersonaGlobal) {
+                      selPersonaGlobal.value = String(personaId);
+                      try { selPersonaGlobal.dispatchEvent(new Event('change')); } catch(e){}
+                    }
+
+                    // 2) rellenar cargo (inpRol)
+                    try { if (inpRolEl) inpRolEl.value = (pObj.Cargo ?? pObj.cargo ?? ''); } catch(e){}
+
+                    // 3) habilitar botones inline (editar / eliminar) y setear data-persona-id
+                    try {
+                      if (btnEditInline) {
+                        btnEditInline.disabled = false;
+                        btnEditInline.dataset.personaId = String(personaId);
+                      }
+                      if (btnDeleteInline) {
+                        btnDeleteInline.disabled = false;
+                        btnDeleteInline.dataset.personaId = String(personaId);
+                      }
+                      // si tienes función que actualiza estados de botones, llamarla
+                      try { if (typeof updatePersonaInlineButtons === 'function') updatePersonaInlineButtons(); } catch(e){ console.warn('updatePersonaInlineButtons fallo', e); }
+                    } catch(e){ console.warn('Habilitar botones inline fallo', e); }
+
+                    // 4) cambiar a tab general (no modificamos #personaInfo desde región)
+                    try { new bootstrap.Tab(document.querySelector('#tab-general-tab')).show(); } catch(e){}
+
+                  } catch(err) { console.warn('btnUsePersonaGeneral click error', err); }
+                };
+              }
+
+              const btnView = document.getElementById('btnViewPersonaFull');
+              if (btnView) {
+                btnView.onclick = () => {
+                  try {
+                    // Mostrar más info podría abrir otro modal; por ahora dejamos el preview limitado a la pestaña región
+                    // Si quieres abrir modal detalle aquí, llama tu función correspondiente.
+                    // No se copia a pestaña general la ficha automáticamente (solo el ID/cargo/btns).
+                  } catch(e){ console.warn('btnViewPersonaFull click error', e); }
+                };
+              }
+            }, 20);
+
+          } catch(e){ console.warn('regPersona change handler fallo', e); }
+        });
+
+        // disparar si ya hay seleccionado
+        try {
+          const cur = regPersonaSel.value;
+          if (cur) regPersonaSel.dispatchEvent(new Event('change'));
+        } catch(e){}
+      } else {
+        if (regionPersonaInfoEl) regionPersonaInfoEl.innerHTML = '<div class="text-muted small">Selecciona una persona para ver su información.</div>';
+      }
+    })();
+
+    /* =====================================================
+       7) Asegura pintar región cuando se cambia a pestaña Región
+    ======================================================*/
+    (function attachTabAndSelectHandlers() {
+      const tabBtn = document.querySelector('#tab-region-tab');
+      if (tabBtn && !tabBtn._regionInit) {
+        tabBtn._regionInit = true;
+        tabBtn.addEventListener('shown.bs.tab', async () => {
+          try {
+            const sel = document.getElementById('regRegion');
+            const rid = sel?.value || null;
+            await ensureMapReadyAndShowRegion(rid);
+          } catch(e){ console.warn('shown.bs.tab handler error', e); }
+        });
+      }
+
+      const regSel = document.getElementById('regRegion');
+      if (regSel && !regSel._changeAttached) {
+        regSel._changeAttached = true;
+        regSel.addEventListener('change', async (ev) => {
+          const newRid = String(ev.target.value || '').trim();
+          if (!newRid) return;
+          const cached = window.REGION_MODULE?.personasPorRegion?.[newRid];
+          if (cached && cached.length) {
+            safeRenderRegionPersonas(newRid, cached);
+          } else {
+            try {
+              const pr = await apiGet(`/api/regiones/${encodeURIComponent(newRid)}/personas`);
+              const personas = pr?.personas ?? (Array.isArray(pr) ? pr : []);
+              safeRenderRegionPersonas(newRid, personas);
+              window.REGION_MODULE = window.REGION_MODULE || {};
+              window.REGION_MODULE.personasPorRegion = window.REGION_MODULE.personasPorRegion || {};
+              window.REGION_MODULE.personasPorRegion[newRid] = personas;
+            } catch(e){ console.warn('fetch personas por region fallo', e); }
+          }
+          await ensureMapReadyAndShowRegion(newRid);
+        });
+      }
+    })();
+
+  }, { once: true });
+
+  /* =====================================================
+     MOSTRAR MODAL
+  ====================================================== */
+  new bootstrap.Modal(modalAssignEl).show();
+  return;
+}
+
   // ========== DETALLES (abre modal nuevo) ==========
   if (btn && btn.dataset && btn.dataset.action === 'details') {
     e.preventDefault();
@@ -2832,6 +3203,1093 @@ function renderGroupModal(grupoToken) {
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
   modal.show();
 }
+
+/* =========================
+   Asignación por Región — Helpers y handler global
+   Pegar en main.js (después de las funciones existentes)
+   ========================= */
+// ====== Module: Assign by Region ======
+// Requiere Leaflet incluido en tu base.html, por ejemplo:
+// <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+// <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+
+
+
+// Renderiza lista de personas en la derecha (llama cuando tengas personas)
+function renderRegionPersonas(region_id, personas) {
+  const sel = document.getElementById('regPersona');
+  if (!sel) return;
+  sel.innerHTML = ['<option value="">— Seleccione —</option>']
+    .concat((personas || []).map(p => {
+      return `<option value="${p.ID}">${escapeHtml(p.Nombre)}${p.Cargo ? ' — ' + escapeHtml(p.Cargo) : ''}</option>`;
+    })).join('');
+
+  // muestra info resumen de la región
+  const reg = (window.REGION_MODULE.regiones || []).find(r => String(r.id) === String(region_id));
+  const infoEl = document.getElementById('regRegionInfo');
+  if (infoEl) {
+    infoEl.textContent = reg ? `Región: ${reg.nombre}` : '';
+  }
+
+  // limpia ficha persona
+  showRegionPersonaInfo(null);
+}
+
+// Muestra ficha detallada de persona en #regionPersonaInfo
+function showRegionPersonaInfo(p) {
+  const el = document.getElementById('regionPersonaInfo');
+  if (!el) return;
+  if (!p) {
+    el.innerHTML = `<div class="text-muted small">Selecciona una persona para ver su región, municipios y datos de contacto.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="fw-semibold">${escapeHtml(p.Nombre)}</div>
+    <div class="small text-muted">${escapeHtml(p.Cargo || '-')}</div>
+    <div class="mt-2 small"><b>Teléfono:</b> ${escapeHtml(p.Telefono || p['Teléfono'] || '-')}</div>
+    <div class="small"><b>Correo:</b> ${escapeHtml(p.Correo || '-')}</div>
+    <div class="small"><b>Unidad / Región:</b> ${escapeHtml(p['Unidad/Region'] || p['Unidad/Región'] || '-')}</div>
+    <div class="mt-2">
+      <button id="btnUsarPersonaRegion" class="btn btn-sm btn-success w-100">Usar esta persona en la designación</button>
+    </div>
+  `;
+
+  // enlaza el botón para copiar a la pestaña general
+  const btn = document.getElementById('btnUsarPersonaRegion');
+  if (btn) {
+    btn.onclick = () => {
+      // copia al select #selPersona (y TomSelect si existe)
+      try {
+        const sel = document.getElementById('selPersona');
+        if (sel) sel.value = String(p.ID);
+        if (window.personaTS) {
+          try { window.personaTS.setValue(String(p.ID), true); } catch {}
+        }
+        // rellena rol
+        const inpRol = document.getElementById('inpRol');
+        if (inpRol) inpRol.value = p.Cargo || '';
+        // cambia a pestaña general
+        try { new bootstrap.Tab(document.querySelector('#tab-general-tab')).show(); } catch(e){ }
+      } catch (e) { console.warn('Error usando persona region:', e); }
+    };
+  }
+}
+
+// muestra / limpia info de region (simple)
+function renderRegionInfo(regionObj, personas) {
+  const info = document.getElementById('regRegionInfo');
+  if (!info) return;
+  if (!regionObj) {
+    info.textContent = 'Selecciona una región para ver sus municipios.';
+  } else {
+    info.textContent = `${regionObj.nombre} — ${ (personas || []).length } representantes.`;
+  }
+}
+
+// util escape
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// -----------------------------
+// initAssignRegionModule (mejorada, idempotente)
+// -----------------------------
+async function initAssignRegionModule() {
+  // init structure
+  window.REGION_MODULE = window.REGION_MODULE || {
+    regiones: [],
+    region_municipios: [],
+    personasPorRegion: {},
+    muniToRegion: {},
+    inited: false,
+    listenersInited: false,
+    _bootstrapped: false
+  };
+
+  // si ya inited, retorna inmediatamente
+  if (window.REGION_MODULE.inited) return window.REGION_MODULE;
+
+  // 0) asegúrate de poblar cache global de regiones/municipios
+  await bootstrapRegionCache(); // idempotente, rellena REGION_MODULE.regiones, region_municipios, muniToRegion
+  await bootstrapMunicipiosAndMap();
+
+  // 1) si aún no tenemos regiones en la estructura, toma de bootstrap cache
+  if (!Array.isArray(window.REGION_MODULE.regiones) || !window.REGION_MODULE.regiones.length) {
+    // si bootstrap puso regiones, úsalas
+    if (Array.isArray(window.REGION_MODULE.regiones) && window.REGION_MODULE.regiones.length) {
+      // ok
+    } else {
+      // intenta solicitar /api/regiones como fallback
+      try {
+        const regs = await apiGet('/api/regiones');
+        window.REGION_MODULE.regiones = Array.isArray(regs) ? regs : [];
+      } catch (e) {
+        console.warn('initAssignRegionModule: no se pudieron cargar /api/regiones', e);
+        window.REGION_MODULE.regiones = window.REGION_MODULE.regiones || [];
+      }
+    }
+  }
+
+  // 2) Rellena <select id="regRegion"> si existe
+  const sel = document.getElementById('regRegion');
+  if (sel) {
+    sel.innerHTML = ['<option value="">— Seleccione región —</option>']
+      .concat((window.REGION_MODULE.regiones || []).map(r => `<option value="${escapeHtml(String(r.id))}">${escapeHtml(r.nombre)}</option>`))
+      .join('');
+  }
+
+  // 3) Asegura que muniToRegion esté poblado (bootstrapRegionCache debería hacerlo)
+  if (!window.REGION_MODULE.muniToRegion || Object.keys(window.REGION_MODULE.muniToRegion).length === 0) {
+    // Si region_municipios ya existe, constrúyelo localmente
+    if (Array.isArray(window.REGION_MODULE.region_municipios) && window.REGION_MODULE.region_municipios.length) {
+      const map = {};
+      window.REGION_MODULE.region_municipios.forEach(rm => {
+        const k = normalizeMunicipioKey(rm.municipio || '');
+        if (k) map[k] = String(rm.region_id);
+      });
+      window.REGION_MODULE.muniToRegion = map;
+    } else {
+      // intenta obtener todo en un solo endpoint (si lo creaste)
+      try {
+        const all = await apiGet('/api/region_municipios_all');
+        if (all && all.muni_to_region) {
+          window.REGION_MODULE.muniToRegion = all.muni_to_region;
+          // normaliza keys por si acaso
+          const normalized = {};
+          Object.keys(window.REGION_MODULE.muniToRegion).forEach(k => {
+            normalized[normalizeMunicipioKey(k)] = String(window.REGION_MODULE.muniToRegion[k]);
+          });
+          window.REGION_MODULE.muniToRegion = normalized;
+        }
+      } catch (e) {
+        // no crítico
+        console.warn('initAssignRegionModule: no pudo poblar muniToRegion desde /api/region_municipios_all', e);
+      }
+    }
+  }
+
+  // 4) Listeners (solo una vez)
+  if (!window.REGION_MODULE.listenersInited) {
+    // al cambiar región -> solicitar personas por region (cache)
+    const selRegion = document.getElementById('regRegion');
+    if (selRegion) {
+      selRegion.addEventListener('change', async (ev) => {
+        const rid = String(ev.target.value || '');
+        if (!rid) {
+          renderRegionPersonas(null, []);
+          return;
+        }
+        // cache
+        if (window.REGION_MODULE.personasPorRegion && window.REGION_MODULE.personasPorRegion[rid]) {
+          renderRegionPersonas(rid, window.REGION_MODULE.personasPorRegion[rid]);
+          return;
+        }
+        // fetch
+        try {
+          const rresp = await apiGet(`/api/regiones/${encodeURIComponent(rid)}/personas`);
+          const personas = (rresp && Array.isArray(rresp.personas)) ? rresp.personas : (Array.isArray(rresp) ? rresp : []);
+          window.REGION_MODULE.personasPorRegion = window.REGION_MODULE.personasPorRegion || {};
+          window.REGION_MODULE.personasPorRegion[rid] = personas;
+          renderRegionPersonas(rid, personas);
+        } catch (err) {
+          console.warn('Error al cargar personas por región:', err);
+          renderRegionPersonas(rid, []);
+        }
+      });
+    }
+
+    // al cambiar regPersona -> mostrar ficha
+    const selPersona = document.getElementById('regPersona');
+    if (selPersona) {
+      selPersona.addEventListener('change', (ev) => {
+        const pid = String(ev.target.value || '');
+        if (!pid) { showRegionPersonaInfo(null); return; }
+
+        // busca en cache
+        let found = null;
+        for (const k of Object.keys(window.REGION_MODULE.personasPorRegion || {})) {
+          const arr = window.REGION_MODULE.personasPorRegion[k] || [];
+          const p = arr.find(x => String(x.ID) === pid || String(x.id) === pid);
+          if (p) { found = p; break; }
+        }
+        // fallback: catalogIndex
+        if (!found && window.catalogIndex && window.catalogIndex[pid]) found = window.catalogIndex[pid];
+        showRegionPersonaInfo(found);
+      });
+    }
+
+    window.REGION_MODULE.listenersInited = true;
+  }
+
+  window.REGION_MODULE.inited = true;
+  return window.REGION_MODULE;
+}
+
+
+// ------------------ Helpers región / municipios (cliente) ------------------
+
+/**
+ * Normaliza un string similar al backend:
+ * - extra spaces collapsed
+ * - lowercase (casefold)
+ * - optionally remove diacritics (normalize NFD + remove)
+ */
+function normalizeMunicipioKey(s) {
+  if (!s) return '';
+  // collapse whitespace, trim
+  let t = String(s).trim().replace(/\s+/g, ' ');
+  // remove diacritics
+  try {
+    t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  } catch (e) {}
+  return t.toLowerCase();
+}
+
+/**
+ * bootstrapRegionCache()
+ * - idempotente
+ * - carga /api/region_municipios_all y rellena window.REGION_MODULE caches:
+ *    - REGION_MODULE.regiones
+ *    - REGION_MODULE.region_municipios (array)
+ *    - REGION_MODULE.muniToRegion (map: normalized_muni -> region_id)
+ */
+async function bootstrapRegionCache() {
+  window.REGION_MODULE = window.REGION_MODULE || { inited:false, regiones:[], region_municipios:[], muniToRegion:{} , _bootstrapped:false };
+  if (window.REGION_MODULE._bootstrapped) return window.REGION_MODULE;
+
+  try {
+    const resp = await apiGet('/api/region_municipios_all');
+    if (resp && resp.ok) {
+      window.REGION_MODULE.regiones = Array.isArray(resp.regiones) ? resp.regiones : [];
+      window.REGION_MODULE.region_municipios = Array.isArray(resp.region_municipios) ? resp.region_municipios : [];
+
+      // build muni->region mapping normalized (use normalizeMunicipioKey)
+      const map = {};
+      // If backend gave a map:
+      if (resp.muni_to_region && typeof resp.muni_to_region === 'object') {
+        for (const k of Object.keys(resp.muni_to_region)) {
+          const norm = normalizeMunicipioKey(k);
+          if (norm) map[norm] = String(resp.muni_to_region[k]);
+        }
+      }
+      // Also ensure we include explicit rows list if present
+      if (Array.isArray(window.REGION_MODULE.region_municipios) && window.REGION_MODULE.region_municipios.length) {
+        for (const rm of window.REGION_MODULE.region_municipios) {
+          const k = normalizeMunicipioKey(rm.municipio || '');
+          if (k) map[k] = String(rm.region_id);
+        }
+      }
+
+      window.REGION_MODULE.muniToRegion = map;
+      window.REGION_MODULE._bootstrapped = true;
+      return window.REGION_MODULE;
+    } else {
+      console.warn('bootstrapRegionCache: respuesta inválida', resp);
+      return window.REGION_MODULE;
+    }
+  } catch (e) {
+    console.warn('bootstrapRegionCache fallo:', e);
+    return window.REGION_MODULE;
+  }
+}
+
+
+/**
+ * inferRegionIdByMunicipio(muniName)
+ * - devuelve region_id (number or string) o null
+ */
+function inferRegionIdByMunicipio(muniName) {
+  if (!muniName) return null;
+  const k = normalizeMunicipioKey(muniName);
+  const map = (window.REGION_MODULE && window.REGION_MODULE.muniToRegion) || {};
+  return map[k] != null ? String(map[k]) : null;
+}
+
+/**
+ * setRegionAndPersons(regionId, personsArray)
+ * - Pone el select #regRegion = regionId (string), rellena regPersona con personsArray (si viene)
+ * - Guarda en cache personasPorRegion para evitar refetch
+ * - No hace dispatch change (evita re-fetch doble). Si quieres dispatch, modifícalo.
+ */
+function setRegionAndPersons(regionId, personsArray) {
+  if (!regionId) return;
+  window.REGION_MODULE = window.REGION_MODULE || { personasPorRegion: {} };
+
+  // 1) Asegura que regRegion tenga la opción (si no existe, la añade)
+  const regSel = document.getElementById('regRegion');
+  if (regSel) {
+    const strRid = String(regionId);
+    let optExists = false;
+    for (let i=0;i<regSel.options.length;i++){
+      if (String(regSel.options[i].value) === strRid) { optExists = true; break; }
+    }
+    if (!optExists) {
+      // intenta encontrar nombre en la cache de regiones
+      const reg = (window.REGION_MODULE.regiones || []).find(r => String(r.id) === strRid);
+      const label = reg ? reg.nombre : `Región ${strRid}`;
+      const newOpt = document.createElement('option');
+      newOpt.value = strRid;
+      newOpt.textContent = label;
+      // append but keep alphabetical? simple append is fine.
+      regSel.appendChild(newOpt);
+    }
+    // ahora sí setea el value
+    try { regSel.value = strRid; } catch(e) { regSel.value = strRid; }
+  }
+
+  // 2) cache y render personas
+  window.REGION_MODULE.personasPorRegion = window.REGION_MODULE.personasPorRegion || {};
+  if (Array.isArray(personsArray) && personsArray.length) {
+    window.REGION_MODULE.personasPorRegion[String(regionId)] = personsArray;
+    renderRegionPersonas(String(regionId), personsArray);
+  } else {
+    const cached = window.REGION_MODULE.personasPorRegion && window.REGION_MODULE.personasPorRegion[String(regionId)];
+    if (cached) {
+      renderRegionPersonas(String(regionId), cached);
+    } else {
+      // desencadena listener de cambio para que haga fetch (si lo prefieres)
+      if (regSel) regSel.dispatchEvent(new Event('change'));
+    }
+  }
+}
+
+// -----------------------------
+// MUNICIPIOS_MODULE (módulo completo, parcheado con colores por región)
+// -----------------------------
+window.MUNICIPIOS_MODULE = window.MUNICIPIOS_MODULE || (function(){
+  const M = {
+    inited: false,
+    features: [],        // GeoJSON features
+    muniGeoMap: {},      // normalized_muni -> [feature, ...]
+    map: null,
+    polygonsLayer: null,
+    MUNICIPIOS_URL: '/static/municipios.json',
+    featureCollection: null,
+    muniToRegion: {},    // filled by loadRegionColorsAndMap
+    regionColorMap: {},  // filled by loadRegionColorsAndMap
+    regionList: []
+  };
+
+  // ---------- Helpers ----------
+  function normalizeKey(s){
+    if(!s) return '';
+    try {
+      return String(s).trim().replace(/\s+/g,' ')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    } catch(e) {
+      return String(s).trim().replace(/\s+/g,' ').toLowerCase();
+    }
+  }
+
+  function isFiniteNumber(x){ return typeof x === 'number' && isFinite(x); }
+  function toNumLoose(v){
+    if (v === null || v === undefined) return NaN;
+    if (typeof v === 'string') v = v.replace(/,/g, '.').trim();
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  // ------------- Sanitizador + safe add -------------
+  function sanitizeCoordsArray(arr){
+    if (!Array.isArray(arr)) return null;
+    // base: coordinate pair
+    if (arr.length >= 2 && typeof arr[0] !== 'object') {
+      const lon = toNumLoose(arr[0]);
+      const lat = toNumLoose(arr[1]);
+      if (!isFiniteNumber(lon) || !isFiniteNumber(lat)) return null;
+      const rest = arr.slice(2).map(toNumLoose).filter(Number.isFinite);
+      return [lon, lat, ...rest];
+    }
+    // nested
+    const out = [];
+    for (const el of arr){
+      const s = sanitizeCoordsArray(el);
+      if (s !== null) out.push(s);
+    }
+    return out.length ? out : null;
+  }
+
+  function sanitizeGeometry(geom){
+    if (!geom || !geom.type) return null;
+    const type = geom.type;
+    try {
+      if (type === 'Point') {
+        const c = sanitizeCoordsArray(geom.coordinates);
+        if (!c) return null;
+        return { type: 'Point', coordinates: c };
+      }
+      if (type === 'LineString' || type === 'MultiPoint') {
+        const c = sanitizeCoordsArray(geom.coordinates);
+        if (!c) return null;
+        return { type, coordinates: c };
+      }
+      if (type === 'Polygon' || type === 'MultiLineString') {
+        const c = sanitizeCoordsArray(geom.coordinates);
+        if (!c) return null;
+        return { type, coordinates: c };
+      }
+      if (type === 'MultiPolygon') {
+        const c = sanitizeCoordsArray(geom.coordinates);
+        if (!c) return null;
+        return { type: 'MultiPolygon', coordinates: c };
+      }
+      if (type === 'GeometryCollection') {
+        const geoms = [];
+        for (const g of (geom.geometries || [])) {
+          const sg = sanitizeGeometry(g);
+          if (sg) geoms.push(sg);
+        }
+        return geoms.length ? { type: 'GeometryCollection', geometries: geoms } : null;
+      }
+    } catch (e) {
+      console.warn('sanitizeGeometry error', e);
+      return null;
+    }
+    return null;
+  }
+
+  async function safeAddGeoJSON(layer, geojson){
+    if (!layer || !geojson) return;
+    try {
+      const toAdd = (geojson.type === 'Feature') ? { type: 'FeatureCollection', features: [geojson] } : geojson;
+      layer.addData(toAdd);
+      console.debug('safeAddGeoJSON: addData OK (direct)', (geojson.properties && geojson.properties.municipio) || null);
+      return;
+    } catch (err) {
+      console.warn('safeAddGeoJSON: addData directo falló, intentando fallback.', err, geojson && geojson.properties && geojson.properties.municipio);
+      let clean = null;
+      try { clean = sanitizeGeoJSON(geojson); } catch(e){ clean = null; }
+      if (clean) {
+        try { layer.addData(clean); console.debug('safeAddGeoJSON: addData OK (sanitizado)'); return; }
+        catch(e2){ console.error('safeAddGeoJSON: addData con GeoJSON sanitizado falló', e2); }
+      }
+      try {
+        const tmpObj = (geojson.type === 'Feature') ? { type:'FeatureCollection', features:[geojson] } : geojson;
+        const tmp = L.geoJSON(tmpObj);
+        let count = 0;
+        tmp.eachLayer(l => {
+          try { layer.addLayer(l); count++; }
+          catch(e){ console.warn('safeAddGeoJSON: no pudo añadir sublayer', e); }
+        });
+        if (count) { console.debug('safeAddGeoJSON: fallback ok, capas transferidas:', count); return; }
+        console.error('safeAddGeoJSON: tmp creó 0 capas para', geojson && geojson.properties && geojson.properties.municipio);
+      } catch(e3){
+        console.error('safeAddGeoJSON: fallback final falló', e3, geojson && geojson.properties && geojson.properties.municipio);
+      }
+      console.error('safeAddGeoJSON: no se pudo agregar GeoJSON al layer. GeoJSON original:', geojson);
+    }
+  }
+
+  function sanitizeGeoJSON(obj){
+    if (!obj) return null;
+    if (obj.type === 'FeatureCollection') {
+      const feats = [];
+      for (const f of (obj.features || [])) {
+        const sf = sanitizeFeature(f);
+        if (sf) feats.push(sf);
+        else {
+          console.warn('GeoJSON: feature omitida por coordenadas inválidas', f && f.properties ? f.properties : f);
+        }
+      }
+      return { type: 'FeatureCollection', features: feats };
+    }
+    if (obj.type === 'Feature') return sanitizeFeature(obj) ? obj : null;
+    const sgeom = sanitizeGeometry(obj);
+    if (sgeom) return { type: 'Feature', properties: {}, geometry: sgeom };
+    return null;
+  }
+
+  function sanitizeFeature(feature){
+    if (!feature || feature.type !== 'Feature') return null;
+    const sgeom = sanitizeGeometry(feature.geometry);
+    if (!sgeom) return null;
+    return { type: 'Feature', properties: feature.properties || {}, geometry: sgeom };
+  }
+
+  // ------------- Parser WKT robusto -------------
+  function parseWKTToGeoJSONFeature(wkt, props = {}) {
+    if (!wkt || typeof wkt !== 'string') return null;
+    let s = String(wkt).trim();
+
+    // eliminar SRID=xxxx;
+    s = s.replace(/^\s*SRID=\d+;/i, '').trim();
+    // limpiar caracteres raros (control, non-ascii)
+    s = s.replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    if (!s) return null;
+    // manejar EMPTY
+    if (/EMPTY$/i.test(s)) return null;
+
+    // quitar tokens Z/M después del tipo (ej: POLYGON Z ( ... ) )
+    s = s.replace(/(POLYGON|MULTIPOLYGON)\s+[ZM]\s*\(/i, (m, p1) => p1 + '(');
+
+    // detectar tipo
+    const isMulti = /^MULTIPOLYGON/i.test(s);
+    const isPoly = /^POLYGON/i.test(s);
+    if (!isPoly && !isMulti) return null;
+
+    // extraer contenido entre primer '(' y último ')'
+    const firstParen = s.indexOf('(');
+    const lastParen  = s.lastIndexOf(')');
+    if (firstParen < 0 || lastParen <= firstParen) return null;
+    let inner = s.slice(firstParen, lastParen + 1).trim();
+
+    function parseRingsFromParenString(str) {
+      const rings = [];
+      let cur = '';
+      let depth = 0;
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (ch === '(') {
+          depth++;
+          if (depth >= 2) cur += ch;
+          continue;
+        }
+        if (ch === ')') {
+          if (depth >= 2) cur += ch;
+          depth--;
+          if (depth === 1) {
+            const ringText = cur.trim();
+            if (ringText) {
+              const pts = ringText.split(/\s*,\s*/).map(pt => {
+                const parts = pt.trim().replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+                const nums = parts.map(p => Number(String(p).replace(/,/g, '.')));
+                if (nums.length < 2 || Number.isNaN(nums[0]) || Number.isNaN(nums[1])) return null;
+                return [nums[0], nums[1]];
+              }).filter(Boolean);
+              if (pts.length) rings.push(pts);
+            }
+            cur = '';
+          }
+          continue;
+        }
+        if (depth >= 2) cur += ch;
+      }
+      return rings;
+    }
+
+    function extractPolygonsFromMulti(innerStr) {
+      const polygons = [];
+      let cur = '';
+      let depth = 0;
+      for (let i = 0; i < innerStr.length; i++) {
+        const ch = innerStr[i];
+        if (ch === '(') {
+          depth++;
+          if (depth >= 2) cur += ch;
+          continue;
+        }
+        if (ch === ')') {
+          if (depth >= 2) cur += ch;
+          depth--;
+          if (depth === 0) {
+            const piece = cur.trim();
+            if (piece) {
+              polygons.push('(' + piece.replace(/^\(+|\)+$/g,'') + ')');
+            }
+            cur = '';
+          }
+          continue;
+        }
+        if (depth >= 1) cur += ch;
+      }
+      return polygons;
+    }
+
+    try {
+      if (isMulti) {
+        const polyBlocks = extractPolygonsFromMulti(inner);
+        const multiCoords = [];
+        for (const block of polyBlocks) {
+          const rings = parseRingsFromParenString(block);
+          if (!rings || !rings.length) continue;
+          multiCoords.push(rings);
+        }
+        if (!multiCoords.length) return null;
+        return { type: 'Feature', properties: props || {}, geometry: { type: 'MultiPolygon', coordinates: multiCoords } };
+      } else {
+        const rings = parseRingsFromParenString(inner);
+        if (!rings || !rings.length) return null;
+        return { type: 'Feature', properties: props || {}, geometry: { type: 'Polygon', coordinates: rings } };
+      }
+    } catch (e) {
+      console.warn('parseWKTToGeoJSONFeature error', e);
+      return null;
+    }
+  }
+
+  // ------------- WKT helpers: detect swap -------------
+  function maybeSwapIfLatLonSample(sample){
+    if (!Array.isArray(sample) || sample.length < 2) return false;
+    const a = toNumLoose(sample[0]), b = toNumLoose(sample[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    if (Math.abs(a) <= 90 && Math.abs(b) > 90) return true;
+    return false;
+  }
+  function swapCoordsRec(coords){
+    if (!Array.isArray(coords)) return coords;
+    if (coords.length && typeof coords[0] !== 'object') {
+      return [coords[1], coords[0], ...(coords.slice(2) || [])];
+    }
+    return coords.map(swapCoordsRec);
+  }
+  function deepRepairCoords(coords){
+    if (!Array.isArray(coords)) return null;
+    if (coords.length && typeof coords[0] !== 'object') {
+      const a = toNumLoose(coords[0]), b = toNumLoose(coords[1]);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      const rest = coords.slice(2).map(v=> toNumLoose(v)).filter(Number.isFinite);
+      return [a,b,...rest];
+    }
+    const out = [];
+    for (const sub of coords){
+      const r = deepRepairCoords(sub);
+      if (!r) return null;
+      out.push(r);
+    }
+    return out.length ? out : null;
+  }
+
+  // ----------------------------------------------------
+  // Region colors / mapping: carga endpoint region_municipios_all
+  // ----------------------------------------------------
+  async function loadRegionColorsAndMap() {
+    try {
+      const res = await fetch('/api/region_municipios_all', { cache: 'no-store' });
+      if (!res.ok) throw new Error('fetch region_municipios_all ' + res.status);
+      const j = await res.json();
+
+      M.regionList = Array.isArray(j.regiones) ? j.regiones : (j.regiones || []);
+      M.muniToRegion = j.muni_to_region && typeof j.muni_to_region === 'object' ? j.muni_to_region : {};
+      if (!M.muniToRegion || Object.keys(M.muniToRegion).length === 0) {
+        M.muniToRegion = {};
+        for (const rm of (j.region_municipios || [])) {
+          const key = normalizeKey(rm.municipio || '');
+          if (key) M.muniToRegion[key] = rm.region_id;
+        }
+      }
+
+      M.regionColorMap = {};
+      for (const r of (M.regionList || [])) {
+        if (r && r.id != null) M.regionColorMap[String(r.id)] = (r.color || '').trim() || null;
+      }
+
+      console.log('[MUNICIPIOS_MODULE] loadRegionColorsAndMap OK; regiones:', (M.regionList||[]).length);
+      return { muniToRegion: M.muniToRegion, regionColorMap: M.regionColorMap };
+    } catch (e) {
+      console.warn('[MUNICIPIOS_MODULE] loadRegionColorsAndMap error', e);
+      M.muniToRegion = M.muniToRegion || {};
+      M.regionColorMap = M.regionColorMap || {};
+      return null;
+    }
+  }
+
+  // style helper uses M.muniToRegion & M.regionColorMap
+  function styleForFeature(feature, opts = {}) {
+    const defaultColor = '#0b5ed7';
+    try {
+      const muni = normalizeKey((feature && feature.properties && feature.properties.municipio) || '');
+      const rid = (M.muniToRegion && M.muniToRegion[muni] != null) ? String(M.muniToRegion[muni]) : null;
+      const baseColor = (rid && M.regionColorMap && M.regionColorMap[rid]) ? M.regionColorMap[rid] : defaultColor;
+
+      if (opts.highlightRegionId && String(opts.highlightRegionId) === String(rid)) {
+        return { color: baseColor, weight: 2.5, opacity: 0.95, fillOpacity: 0.6 };
+      }
+      return { color: baseColor, weight: 1, opacity: 0.9, fillOpacity: 0.35 };
+    } catch (e) {
+      return { color: defaultColor, weight: 1, fillOpacity: 0.35 };
+    }
+  }
+
+  function refreshPolygonsStyle(highlightRegionId = null) {
+    if (!M.polygonsLayer) return;
+    M.polygonsLayer.eachLayer(layer => {
+      try {
+        const f = layer.feature;
+        if (!f) return;
+        const st = styleForFeature(f, { highlightRegionId });
+        if (typeof layer.setStyle === 'function') layer.setStyle(st);
+      } catch (e) {
+        console.warn('refreshPolygonsStyle error', e);
+      }
+    });
+  }
+
+  // expose safeAddGeoJSON for external use
+  M.safeAddGeoJSON = safeAddGeoJSON;
+
+  // (re)exponer aliases globales seguros
+  (function exposeAliasesSafely(){
+    const names = [
+      'bootstrapMunicipiosAndMap',
+      'loadMunicipiosJson',
+      'initMunicipiosMap',
+      'showMunicipiosForRegion',
+      'showMunicipiosByNames',
+      'safeAddGeoJSON',
+      'loadRegionColorsAndMap',
+      'refreshPolygonsStyle',
+      'styleForFeature',
+      'ensureMapReadyAndShowRegion'
+    ];
+
+    names.forEach(name => {
+      if (typeof window[name] === 'function') return;
+      window[name] = function(...args){
+        try {
+          const fn = M && M[name];
+          if (typeof fn === 'function') {
+            return fn.apply(M, args);
+          } else {
+            console.warn(`Alias ${name} invocado pero M.${name} aún no está disponible.`);
+            return Promise.reject(new Error(`M.${name} no disponible aún`));
+          }
+        } catch (e) {
+          console.error(`Error delegando ${name} -> M.${name}`, e);
+          return Promise.reject(e);
+        }
+      };
+    });
+  })();
+
+  // ------------- Cargar municipios (WKT o geometry) -------------
+  async function loadMunicipiosJson(url){
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error('fetch error ' + res.status);
+      const arr = await res.json();
+      if (!Array.isArray(arr)) throw new Error('El JSON no es un array de municipios');
+
+      const feats = [];
+      const map = {};
+      const failed = [];
+
+      for (const item of arr){
+        const muniName = item.municipio || item.Municipio || item.nombre || item.MUN || '';
+        const props = { municipio: muniName, cve_entidad: item.cve_entidad, cve_municipio: item.cve_municipio };
+        let feature = null;
+
+        if (item.geometry && typeof item.geometry === 'object' && item.geometry.type && item.geometry.coordinates) {
+          feature = { type: 'Feature', properties: props, geometry: JSON.parse(JSON.stringify(item.geometry)) };
+        } else {
+          const rawPol = item.poligono ?? item.POLIGONO ?? item.wkt ?? item.WKT ?? null;
+
+          if (rawPol && typeof rawPol === 'object' && rawPol.type && rawPol.coordinates) {
+            feature = { type: 'Feature', properties: props, geometry: JSON.parse(JSON.stringify(rawPol)) };
+          } else {
+            let wkt = rawPol != null ? String(rawPol).trim() : '';
+            if (/^\s*SRID=/i.test(wkt)) {
+              wkt = wkt.replace(/^\s*SRID=\d+;/i, '').trim();
+            }
+            if (!feature && wkt && (wkt[0] === '{' || wkt[0] === '[')) {
+              try {
+                const maybe = JSON.parse(wkt);
+                if (maybe && maybe.type && maybe.coordinates) {
+                  feature = { type: 'Feature', properties: props, geometry: maybe };
+                }
+              } catch(e){}
+            }
+
+            if (!feature && wkt && typeof wellknown === 'function') {
+              try {
+                const geom = wellknown(wkt);
+                if (geom && geom.type && geom.coordinates) feature = { type:'Feature', properties:props, geometry:geom };
+              } catch(e){}
+            }
+
+            if (!feature && wkt) {
+              try {
+                feature = parseWKTToGeoJSONFeature(wkt, props);
+              } catch(e){
+                console.warn('parseWKTToGeoJSONFeature lanzó error', e, muniName);
+                feature = null;
+              }
+            }
+          }
+        }
+
+        if (!feature) {
+          console.warn('loadMunicipiosJson: feature no construida para', muniName, {
+            poligono_raw: item.poligono ?? item.POLIGONO ?? item.wkt ?? item.WKT ?? null,
+            geometry_raw: item.geometry ?? null
+          });
+          failed.push({ municipio: muniName, raw: item.poligono ?? item.POLIGONO ?? item.wkt ?? item.WKT ?? item.geometry ?? null });
+          continue;
+        }
+
+        let sample = null;
+        try {
+          if (feature.geometry.type === 'Polygon') sample = feature.geometry.coordinates[0] && feature.geometry.coordinates[0][0];
+          else if (feature.geometry.type === 'MultiPolygon') sample = feature.geometry.coordinates[0] && feature.geometry.coordinates[0][0] && feature.geometry.coordinates[0][0][0];
+        } catch(e){ sample = null; }
+
+        if (maybeSwapIfLatLonSample(sample)) {
+          feature.geometry.coordinates = swapCoordsRec(feature.geometry.coordinates);
+          console.warn('loadMunicipiosJson: swap aplicado (lat/lon -> lon/lat) para', muniName);
+        }
+        const repaired = deepRepairCoords(feature.geometry.coordinates);
+        if (!repaired) {
+          feature.geometry.coordinates = swapCoordsRec(feature.geometry.coordinates);
+          const repaired2 = deepRepairCoords(feature.geometry.coordinates);
+          if (!repaired2) {
+            console.warn('loadMunicipiosJson: no se pudo reparar coordenadas para', muniName);
+            failed.push({ municipio: muniName, reason: 'coords_repair_failed' });
+            continue;
+          }
+          feature.geometry.coordinates = repaired2;
+        } else {
+          feature.geometry.coordinates = repaired;
+        }
+
+        feats.push(feature);
+        const key = normalizeKey(muniName || '');
+        map[key] = map[key] || [];
+        map[key].push(feature);
+      } // end loop
+
+      M.features = feats;
+      M.muniGeoMap = map;
+      M.featureCollection = { type: 'FeatureCollection', features: feats };
+
+      console.log('[MUNICIPIOS_MODULE] loaded + repaired features:', feats.length, 'keys:', Object.keys(map).length);
+      if (failed.length) {
+        console.warn('[MUNICIPIOS_MODULE] registros fallidos (primeros 20):', failed.slice(0,20));
+      }
+      return M;
+    } catch (e) {
+      console.warn('[MUNICIPIOS_MODULE] loadMunicipiosJson error:', e);
+      throw e;
+    }
+  }
+
+  // ------------- Map init -------------
+  function initMunicipiosMap(containerId = 'regMap'){
+    try {
+      if (M.map) {
+        try { M.map.invalidateSize(); } catch(e){}
+        return M;
+      }
+      const container = document.getElementById(containerId);
+      if (!container) { console.warn('initMunicipiosMap: container no encontrado', containerId); return M; }
+
+      // asegúrate CSS: #regMap{height:...}
+      M.map = L.map(containerId, { preferCanvas: true }).setView([19.3, -99.6], 9);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', maxZoom: 18 }).addTo(M.map);
+
+      // crea polygonsLayer con style dinámico
+      M.polygonsLayer = L.geoJSON(null, {
+        style: (feature)=> styleForFeature(feature, {}),
+        onEachFeature: (f, layer) => {
+          const name = (f.properties && f.properties.municipio) ? f.properties.municipio : 'Municipio';
+          layer.bindTooltip(name, {sticky:true});
+          // interacciones básicas
+          layer.on({
+            mouseover: (e) => {
+              try { e.target.setStyle({ weight: 2.2 }); } catch(e){}
+            },
+            mouseout: (e) => {
+              try { if (M.polygonsLayer.resetStyle) M.polygonsLayer.resetStyle(e.target); } catch(e){}
+            },
+            click: (e) => {
+              try {
+                if (layer.getPopup && !layer.getPopup()) {
+                  layer.bindPopup(`<strong>${name}</strong>`);
+                }
+                if (layer.openPopup) layer.openPopup();
+                if (layer.getBounds && M.map) M.map.fitBounds(layer.getBounds(), { padding:[20,20] });
+              } catch(e){}
+            }
+          });
+        }
+      }).addTo(M.map);
+
+      console.log('[MUNICIPIOS_MODULE] mapa inicializado:', containerId);
+      M.inited = true;
+      return M;
+    } catch (e) {
+      console.warn('initMunicipiosMap error', e);
+      return M;
+    }
+  }
+
+  // ------------- Mostrar por nombres -------------
+  async function showMunicipiosByNames(names = [], clearPrev = true){
+    if (!Array.isArray(names) || !names.length) { console.warn('showMunicipiosByNames: sin nombres'); return; }
+    if (!M.map) initMunicipiosMap();
+    if (!M.polygonsLayer) M.polygonsLayer = L.geoJSON(null).addTo(M.map);
+    if (clearPrev) M.polygonsLayer.clearLayers();
+
+    const keys = Object.keys(M.muniGeoMap || {});
+    const norm = normalizeKey;
+    const added = [];
+    const missing = [];
+
+    for (const nm of names){
+      const orig = nm;
+      const k = norm(nm || '');
+      if (!k) { missing.push({orig, reason:'empty'}); continue; }
+
+      let feats = M.muniGeoMap[k];
+      if (!feats) {
+        const keyFound = keys.find(x => x === k || x.startsWith(k) || k.startsWith(x) || x.indexOf(k) !== -1 || k.indexOf(x) !== -1);
+        if (keyFound) feats = M.muniGeoMap[keyFound];
+      }
+      if (!feats) {
+        const cand = keys.find(x => {
+          const a = x.split(' ').filter(Boolean);
+          const b = k.split(' ').filter(Boolean);
+          const inter = a.filter(v => b.includes(v));
+          return inter.length >= Math.min(1, Math.floor(Math.min(a.length,b.length)/2));
+        });
+        if (cand) feats = M.muniGeoMap[cand];
+      }
+      if (!feats) { missing.push({orig, key:k}); continue; }
+
+      for (const f of feats){
+        try {
+          await safeAddGeoJSON(M.polygonsLayer, f);
+          added.push(k);
+        } catch(e){
+          console.warn('Feature inválida o no añadida para', orig, e);
+        }
+      }
+    }
+
+    try {
+      const layerBounds = M.polygonsLayer.getBounds();
+      if (layerBounds && layerBounds.isValid && layerBounds.isValid()) {
+        M.map.fitBounds(layerBounds.pad(0.1));
+      } else {
+        console.warn('showMunicipiosByNames: no hay bounds válidos tras añadir features');
+      }
+    } catch (e) { console.warn('showMunicipiosByNames fitBounds error', e); }
+
+    // reaplicar estilos (por si se añadieron con color por default)
+    try { refreshPolygonsStyle(); } catch(e){}
+
+    console.log('[MUNICIPIOS_MODULE] showMunicipiosByNames added:', added.length, 'missing:', missing.length);
+    if (missing.length) console.table(missing.slice(0,50));
+  }
+
+  // ------------- Por región -------------
+  function showMunicipiosForRegion(regionId){
+    if (!regionId) { console.warn('showMunicipiosForRegion: regionId vacía'); return; }
+    const rm = (window.REGION_MODULE && Array.isArray(window.REGION_MODULE.region_municipios)) ? window.REGION_MODULE.region_municipios : null;
+    if (!rm) { console.warn('showMunicipiosForRegion: no hay region_municipios en window.REGION_MODULE'); return; }
+    const list = rm.filter(r => String(r.region_id) === String(regionId)).map(x => x.municipio || x.Municipio || x.nombre);
+    if (!list.length) { console.warn('showMunicipiosForRegion: región sin municipios', regionId); return; }
+    showMunicipiosByNames(list, true);
+    try { refreshPolygonsStyle(regionId); } catch(e){ console.warn('refreshPolygonsStyle en showMunicipiosForRegion falló', e); }
+  }
+
+  // ------------- Bootstrap -------------
+  async function bootstrapMunicipiosAndMap(){
+    if (!M.features || !M.features.length) {
+      try { await loadMunicipiosJson(M.MUNICIPIOS_URL); } catch(e){ console.warn('bootstrapMunicipiosAndMap: error al cargar JSON:', e); }
+    }
+
+    // load region colors early
+    try { await loadRegionColorsAndMap(); } catch(e){ console.warn('bootstrapMunicipiosAndMap: loadRegionColorsAndMap fallo', e); }
+
+    const c = document.getElementById('regMap');
+    const visible = c && c.offsetParent !== null;
+    if (visible) {
+      initMunicipiosMap('regMap');
+      if (M.features && M.features.length && M.polygonsLayer) {
+        M.polygonsLayer.clearLayers();
+        let addedCount = 0;
+        for (const f of M.features) {
+          try { await safeAddGeoJSON(M.polygonsLayer, f); addedCount++; }
+          catch (e) { console.warn('feature omitida al agregar:', e, f && f.properties && f.properties.municipio); }
+        }
+        console.log('[MUNICIPIOS_MODULE] features añadidas al layer:', addedCount);
+        try {
+          // reaplicar estilos en bloque
+          refreshPolygonsStyle();
+        } catch(e){ console.warn('refreshPolygonsStyle fallo en bootstrap', e); }
+
+        try {
+          const b = M.polygonsLayer.getBounds();
+          if (b && b.isValid && b.isValid()) M.map.fitBounds(b.pad(0.08));
+        } catch(e){ console.warn('fitBounds fallo', e); }
+      }
+      try { M.map.invalidateSize(); } catch(e){}
+    } else {
+      console.log('[MUNICIPIOS_MODULE] contenedor #regMap no visible, parseado OK pero mapa no inicializado');
+    }
+    M.inited = true;
+    return M;
+  }
+
+  // ------------- Ensure helper (público) -------------
+  async function ensureMapReadyAndShowRegion(regionIdToShow = null) {
+    try {
+      if (!(M.features && M.features.length)) {
+        try { await loadMunicipiosJson(M.MUNICIPIOS_URL); } catch(e){ console.warn('ensure: loadMunicipiosJson fallo', e); }
+      }
+      try { await loadRegionColorsAndMap(); } catch(e){ /* ignore */ }
+
+      if (!M.map) {
+        try { initMunicipiosMap('regMap'); } catch(e){ console.warn('ensure: initMunicipiosMap fallo', e); }
+      }
+
+      if (!M.polygonsLayer && M.map) {
+        try {
+          M.polygonsLayer = L.geoJSON(null, {
+            style: (feature)=> styleForFeature(feature, {}),
+            onEachFeature: (f, layer) => {
+              const name = (f.properties && f.properties.municipio) ? f.properties.municipio : 'Municipio';
+              layer.bindTooltip(name, { sticky:true });
+            }
+          }).addTo(M.map);
+        } catch(e){ console.warn('ensure: crear polygonsLayer fallo', e); }
+      }
+
+      try {
+        let layerCount = 0;
+        M.polygonsLayer?.eachLayer(()=> layerCount++);
+        if (!layerCount && M.featureCollection) {
+          if (typeof M.safeAddGeoJSON === 'function') {
+            await M.safeAddGeoJSON(M.polygonsLayer, M.featureCollection);
+          } else {
+            const tmp = L.geoJSON(M.featureCollection);
+            tmp.eachLayer(l => M.polygonsLayer.addLayer(l));
+          }
+          refreshPolygonsStyle();
+        }
+      } catch(e){ console.warn('ensure: añadir featureCollection fallo', e); }
+
+      if (regionIdToShow) {
+        try { showMunicipiosForRegion(regionIdToShow); }
+        catch(e){ console.warn('ensure: showMunicipiosForRegion fallo', e); }
+      }
+
+      try { setTimeout(()=> { M.map && M.map.invalidateSize && M.map.invalidateSize(); }, 120); } catch(e){}
+    } catch(e) {
+      console.warn('ensureMapReadyAndShowRegion error', e);
+    }
+  }
+
+  // expose
+  M.normalizeKey = normalizeKey;
+  M.parseWKTToGeoJSONFeature = parseWKTToGeoJSONFeature;
+  M.loadMunicipiosJson = loadMunicipiosJson;
+  M.initMunicipiosMap = initMunicipiosMap;
+  M.showMunicipiosByNames = showMunicipiosByNames;
+  M.showMunicipiosForRegion = showMunicipiosForRegion;
+  M.bootstrapMunicipiosAndMap = bootstrapMunicipiosAndMap;
+  M.loadRegionColorsAndMap = loadRegionColorsAndMap;
+  M.styleForFeature = styleForFeature;
+  M.refreshPolygonsStyle = refreshPolygonsStyle;
+  M.ensureMapReadyAndShowRegion = ensureMapReadyAndShowRegion;
+
+  return M;
+})();
+
+
+
 
 
 
