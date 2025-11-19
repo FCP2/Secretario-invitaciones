@@ -25,7 +25,7 @@ from passlib.hash import bcrypt
 from db import (
     engine, SessionLocal,
     Sexo, Partido, Usuario,
-    Actor, Persona, Invitacion, Notificacion
+    Actor, Persona, Invitacion, Notificacion, Region, RegionMunicipio
 )
 from uuid import uuid4
 from sqlalchemy.orm import joinedload
@@ -792,8 +792,159 @@ def api_person_delete():
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
         db.close()
+        
+# Lista de regiones (para poblar #regRegion)
+@app.get("/api/regiones")
+@auth_required
+def api_regiones_list():
+    db = SessionLocal()
+    try:
+        rows = db.query(Region).order_by(Region.nombre.asc()).all()
+        out = [{"id": r.id, "nombre": r.nombre, "slug": r.slug, "color": r.color} for r in rows]
+        return jsonify(out)
+    finally:
+        db.close()
+
+# Personas por region_id
+@app.get("/api/regiones/<int:region_id>/personas")
+@auth_required
+def api_regiones_personas(region_id):
+    db = SessionLocal()
+    try:
+        q = db.query(Persona).filter(Persona.region_id == region_id)
+        try:
+            _ = Persona.activo
+            q = q.filter(Persona.activo == True)
+        except Exception:
+            pass
+        personas = q.order_by(Persona.nombre.asc()).all()
+        out = []
+        for p in personas:
+            out.append({
+                "ID": p.id,
+                "Nombre": p.nombre or "",
+                "Cargo": p.cargo or "",
+                "Telefono": p.telefono or "",
+                "Correo": p.correo or "",
+                "Unidad/Region": p.unidad_region or "",
+                "RegionID": p.region_id,
+                "ParticularNombre": p.particular_nombre or "",
+                "ParticularCargo": p.particular_cargo or "",
+                "ParticularTel": p.particular_tel or "",
+            })
+        return jsonify({"ok": True, "region_id": region_id, "personas": out})
+    finally:
+        db.close()
 
 
+
+# ---- Region: todos los municipios (cache cliente) ----
+@app.get("/api/region_municipios_all")
+@auth_required
+def api_region_municipios_all():
+    db = SessionLocal()
+    try:
+        # devuelve regiones y la tabla region_municipios
+        regs = db.query(Region).order_by(Region.id.asc()).all()  # ajustar modelo: Regione/Region/Regiones
+        # use the real model name, e.g. Regiones or Region
+        regiones_out = [{"id": r.id, "nombre": r.nombre, "slug": getattr(r, "slug", None), "color": getattr(r, "color", None)} for r in regs]
+
+        rms = db.query(RegionMunicipio).order_by(RegionMunicipio.region_id.asc(), RegionMunicipio.municipio.asc()).all()
+        rm_out = [{"id": r.id, "region_id": r.region_id, "municipio": r.municipio} for r in rms]
+
+        # build mapping municipio_normalizado -> region_id (cliente-friendly)
+        muni_map = {}
+        for r in rm_out:
+            key = " ".join(str(r["municipio"]).split()).casefold()
+            muni_map[key] = r["region_id"]
+
+        return jsonify({"ok": True, "regiones": regiones_out, "region_municipios": rm_out, "muni_to_region": muni_map})
+    finally:
+        db.close()
+        
+def _normalize_muni_key(s: str) -> str:
+    """Normalize: strip, collapse spaces, remove diacritics, casefold."""
+    if not s:
+        return ""
+    t = " ".join(str(s).split())        # collapse whitespace
+    try:
+        t = unicodedata.normalize("NFD", t)
+        t = "".join(ch for ch in t if unicodedata.category(ch) != "Mn")
+    except Exception:
+        pass
+    return t.casefold()
+
+@app.get("/api/personas/recomendadas")
+@auth_required
+def api_personas_recomendadas():
+    """
+    GET /api/personas/recomendadas?municipio=Aculco
+
+    Respuesta:
+      { ok: True, municipio: "<canon>", region_ids: [1,2], personas: [ {ID,Nombre,Cargo,Telefono,...}, ... ] }
+    """
+    muni_raw = (request.args.get("municipio") or "").strip()
+    if not muni_raw:
+        return jsonify({"ok": False, "error": "Falta municipio"}), 400
+
+    # Normaliza entrada
+    muni_key = _normalize_muni_key(muni_raw)
+
+    db = SessionLocal()
+    try:
+        # 1) Buscar filas de region_municipios que coincidan (comparando normalizado)
+        #    Para evitar depender de cómo se guardó en BD, traemos todas y comparamos aquí.
+        #    Si prefieres hacerlo sólo con SQL, asegúrate de almacenar una columna normalizada previo.
+        all_rm = db.query(RegionMunicipio).all()
+        matched_region_ids = []
+        for rm in all_rm:
+            rm_key = _normalize_muni_key(rm.municipio or "")
+            if rm_key and rm_key == muni_key:
+                matched_region_ids.append(rm.region_id)
+
+        matched_region_ids = list(dict.fromkeys(matched_region_ids))  # unique, keep order
+
+        if not matched_region_ids:
+            # No hay región configurada para ese municipio
+            return jsonify({"ok": True, "municipio": muni_raw, "region_ids": [], "personas": []})
+
+        # 2) Obtener personas activas de esas regiones
+        q = db.query(Persona).filter(Persona.region_id.in_(matched_region_ids))
+        try:
+            # Si tu modelo tiene columna 'activo', aplicarla
+            _ = Persona.activo
+            q = q.filter(Persona.activo == True)
+        except Exception:
+            pass
+
+        q = q.order_by(Persona.nombre.asc())
+        personas = q.all()
+
+        out = []
+        for p in personas:
+            out.append({
+                "ID": p.id,
+                "Nombre": p.nombre or "",
+                "Cargo": p.cargo or "",
+                "Telefono": p.telefono or "",
+                "Correo": p.correo or "",
+                "Unidad/Region": p.unidad_region or "",
+                "RegionID": p.region_id,
+                "RegionNombre": getattr(p.region, "nombre", None) if getattr(p, "region", None) else None,
+                "SexoID": p.sexo_id,
+                "ParticularNombre": p.particular_nombre or "",
+                "ParticularCargo": p.particular_cargo or "",
+                "ParticularTel": p.particular_tel or "",
+            })
+
+        return jsonify({
+            "ok": True,
+            "municipio": muni_raw,
+            "region_ids": matched_region_ids,
+            "personas": out
+        })
+    finally:
+        db.close()
 # =============================================================================
 # Actores
 # =============================================================================
