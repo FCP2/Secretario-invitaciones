@@ -356,3 +356,34 @@ main::after {
 .day-item.grp-d { border-left: 4px solid #d63384; }
 .day-item.grp-e { border-left: 4px solid #20c997; }
 .day-item.grp-f { border-left: 4px solid #6f42c1; }
+#modalAssign .nav-tabs .nav-link {
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+}
+
+#modalAssign .nav-tabs .nav-link.active {
+  background-color: #0d6efd10;
+  border-color: transparent;
+}
+
+#modalAssign .nav-tabs {
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+
+#modalAssign .card {
+  border-radius: 0.9rem;
+}
+
+#modalAssign .card-header {
+  border-bottom: 1px solid rgba(0,0,0,.05);
+}
+/* estético para el mapa y tarjetas (ajusta colores) */
+/* CSS global: */
+#regMap { position: relative; }
+#regMap .map-dark-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.80); /* ajusta la opacidad */
+  pointer-events: none;
+  z-index: 300; /* por encima de tiles, por debajo de popups (Leaflet usa z-index altos) */
+}
