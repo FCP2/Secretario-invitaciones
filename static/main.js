@@ -22,8 +22,8 @@ const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 const coloresPartidos = {
-  'MORENA':'#a50021','PAN':'#0056a4','PRI':'#0e9347','PRD':'#ffcf00',
-  'PT':'#d52b1e','PVEM':'#78be20','MC':'#f58025','INDEPENDIENTE':'#888','OTRO':'#666'
+  'MORENA':'#831E30','PAN':'#0056a4','PRI':'#FF0000','PRD':'#ffcf00',
+  'PT':'#F8AE42','PVEM':'#78be20','MC':'#f58025','INDEPENDIENTE':'#888','OTRO':'#666'
 };
 function colorPorPartido(valor) {
   if (!valor) return 'OTRO';
@@ -37,7 +37,84 @@ function colorPorPartido(valor) {
   if (v.includes('MC'))     return 'MC';
   return 'OTRO';
 }
+function partidoPillHtml(partido) {
+  if (!partido) return '';
+  const key = colorPorPartido(partido);            // devuelve 'MORENA','PAN',...
+  const color = coloresPartidos[key] || coloresPartidos['OTRO'];
+  // contrast: PRD (amarillo) needs dark text
+  const darkTextFor = new Set(['PRD']);
+  const textColor = darkTextFor.has(key) ? '#222' : '#fff';
+  // escape texto de partido (simple)
+  const safeText = String(partido).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return `<span class="badge rounded-pill" style="background:${color}; color:${textColor}; font-weight:600;">${safeText}</span>`;
+}
 
+
+//HELPERS ROL========
+// wrapper para llamadas al API (usa tu apiGet/apiPost existentes)
+async function fetchCurrentUser() {
+  if (window.CACHED_USER) return window.CACHED_USER;
+  try {
+    const r = await apiGet('/api/auth/me'); // tu wrapper
+    if (r && r.ok) {
+      window.CACHED_USER = { id: r.id, usuario: r.usuario, rol: r.rol };
+      return window.CACHED_USER;
+    } else {
+      window.CACHED_USER = null;
+      return null;
+    }
+  } catch (e) {
+    window.CACHED_USER = null;
+    return null;
+  }
+}
+
+function roleAllowed(role, rolesAttr) {
+  if (!role) return false;
+  if (!rolesAttr) return false;
+  const allowed = rolesAttr.split(',').map(s=>s.trim()).filter(Boolean);
+  return allowed.includes(role);
+}
+
+async function applyRoleUI() {
+  const user = await fetchCurrentUser();
+  const role = user ? (user.rol || user.role) : null;
+  document.querySelectorAll('[data-roles]').forEach(el => {
+    const rolesAttr = el.getAttribute('data-roles') || '';
+    const allowed = roleAllowed(role, rolesAttr);
+    if (!allowed) {
+      if (el.hasAttribute('data-disable-only')) {
+        el.disabled = true;
+        el.classList.add('disabled');
+        // opcional: evitar clicks
+        el.addEventListener('click', e => e.stopImmediatePropagation(), { capture: true });
+      } else {
+        // ocultar
+        el.style.display = 'none';
+      }
+    } else {
+      el.style.display = '';
+      el.disabled = false;
+    }
+  });
+
+  // optional: mostrar rol en UI
+  const roleEl = document.getElementById('currentRoleBadge');
+  if (roleEl) {
+    roleEl.textContent = role || 'Invitado';
+    roleEl.classList.remove('d-none');
+  }
+}
+
+// Llamar al inicio de tu app (después del login) y después de renderizar modales
+document.addEventListener('DOMContentLoaded', () => {
+  applyRoleUI();
+});
+
+// Reaplicar cuando abres modales dinámicos
+document.addEventListener('shown.bs.modal', (e) => {
+  applyRoleUI();
+});
 // ===== Fetch helpers (no cache) =====
 async function fetchJSON(url, opts = {}) {
   const u = new URL(url, window.location.origin);
@@ -76,8 +153,9 @@ async function loadPartidos(){
   }
 }
 
-async function loadPersonas(force=false) {
-  if (!force && STATE.personas.length) return STATE.personas;
+async function loadPersonas(force = false) {
+  window.STATE = window.STATE || {};
+  if (!force && Array.isArray(STATE.personas) && STATE.personas.length) return STATE.personas;
 
   let rows = [];
   try {
@@ -86,29 +164,39 @@ async function loadPersonas(force=false) {
     console.warn('Fallo /api/personas, intentando /api/catalog...', e);
     try {
       const cat = await apiGet('/api/catalog');
-      rows = cat?.personas || [];
+      // api_catalog puede devolver array directo o {personas: [...]}
+      rows = Array.isArray(cat) ? cat : (Array.isArray(cat?.personas) ? cat.personas : []);
     } catch (e2) {
       console.error('No se pudieron cargar personas:', e2);
       rows = [];
     }
   }
 
-  STATE.personas = (Array.isArray(rows) ? rows : []).map(p => ({
-    ID:    p.ID ?? p.id ?? p.Id ?? null,
-    Nombre:p.Nombre ?? p.nombre ?? '',
-    Cargo: p.Cargo ?? p.cargo ?? '',
-    Telefono: p['Teléfono'] ?? p.Telefono ?? p.telefono ?? '',
-    Correo:   p.Correo ?? p.correo ?? '',
-    Unidad:   p['Unidad/Región'] ?? p.unidad_region ?? '',
-    SexoID:   p.SexoID ?? p.sexo_id ?? null,
-    // 👇 campos particulares
-    ParticularNombre: p.ParticularNombre ?? p.particular_nombre ?? '',
-    ParticularCargo:  p.ParticularCargo  ?? p.particular_cargo  ?? '',
-    ParticularTel:    p.ParticularTel    ?? p.particular_tel    ?? '',
-    Activo: p.Activo ?? p.activo ?? true,
-  })).filter(p => p.ID != null);
+  STATE.personas = (Array.isArray(rows) ? rows : []).map(p => {
+    // normalizar nombres posibles para region
+    const regionId = p.RegionID ?? p.region_id ?? p.regionId ?? p.region_id ?? p.region ?? null;
+    const regionNombre = p.RegionNombre ?? p.region_nombre ?? p.regionName ?? p.region_name ?? (typeof p.region === 'object' ? (p.region.nombre || p.region.name) : null);
 
-  // índice para lecturas rápidas en el modal
+    return {
+      ID:    p.ID ?? p.id ?? p.Id ?? null,
+      Nombre: p.Nombre ?? p.nombre ?? '',
+      Cargo: p.Cargo ?? p.cargo ?? '',
+      Telefono: p['Teléfono'] ?? p.Telefono ?? p.telefono ?? '',
+      Correo:   p.Correo ?? p.correo ?? '',
+      Unidad:   p['Unidad/Región'] ?? p.unidad_region ?? p.Unidad ?? '',
+      SexoID:   p.SexoID ?? p.sexo_id ?? null,
+      // particulares
+      ParticularNombre: p.ParticularNombre ?? p.particular_nombre ?? '',
+      ParticularCargo:  p.ParticularCargo  ?? p.particular_cargo  ?? '',
+      ParticularTel:    p.ParticularTel    ?? p.particular_tel    ?? '',
+      Activo: p.Activo ?? p.activo ?? true,
+      // --- campos de región (nuevos) ---
+      RegionID: regionId ?? null,
+      RegionNombre: regionNombre ?? null
+    };
+  }).filter(p => p.ID != null);
+
+  // índice para lecturas rápidas en el modal (incluye región)
   catalogIndex = {};
   for (const p of STATE.personas) catalogIndex[p.ID] = p;
 
@@ -168,6 +256,82 @@ async function loadActores() {
     }
   }
 }
+// === Cargar catálogo de regiones y poblar #npRegion y #epRegion ===
+async function loadRegiones() {
+  try {
+    // Intentamos usar tu wrapper apiGet si existe (envía cookies automáticamente)
+    let body = null;
+    if (typeof apiGet === 'function') {
+      try {
+        body = await apiGet('/api/regiones'); // tu endpoint existente
+      } catch (err) {
+        console.warn('apiGet("/api/regiones") falló, intentando fetch directo...', err);
+        body = null;
+      }
+    }
+
+    // fallback a fetch directo si apiGet no devolvió array
+    if (!body) {
+      try {
+        const res = await fetch('/api/regiones', { credentials: 'same-origin', cache: 'no-store' });
+        if (res.ok) {
+          body = await res.json().catch(() => null);
+        } else {
+          console.warn('/api/regiones status', res.status, res.statusText);
+          // intenta la ruta alternativa si existe
+          const res2 = await fetch('/api/regiones/list', { credentials: 'same-origin', cache: 'no-store' });
+          if (res2.ok) body = await res2.json().catch(() => null);
+        }
+      } catch (e) {
+        console.error('fetch /api/regiones error', e);
+        body = null;
+      }
+    }
+
+    // Normalizar respuesta: puede venir como array o como { regiones: [...] }.
+    let regiones = [];
+    if (Array.isArray(body)) {
+      regiones = body;
+    } else if (body && Array.isArray(body.regiones)) {
+      regiones = body.regiones;
+    } else if (body && Array.isArray(body.data)) {
+      regiones = body.data;
+    } else if (body && body.ok === true && Array.isArray(body.regiones)) {
+      regiones = body.regiones;
+    } else if (body && typeof body === 'object') {
+      // buscar primer array plausible
+      const cand = Object.values(body).find(v => Array.isArray(v) && v.length && (v[0].id || v[0].nombre || v[0].name));
+      if (cand) regiones = cand;
+    }
+
+    // construir opciones HTML
+    const opts = ['<option value="">— Ninguna —</option>']
+      .concat((regiones || []).map(r => {
+        const id = r.id ?? r.ID ?? r.value ?? '';
+        const label = (r.nombre ?? r.name ?? r.title ?? '').toString();
+        return `<option value="${id}">${label}</option>`;
+      })).join('');
+
+    // poblar selects
+    const selNew = document.getElementById('npRegion');
+    const selEdit = document.getElementById('epRegion');
+
+    
+
+    if (selNew) selNew.innerHTML = opts;
+    if (selEdit) selEdit.innerHTML = opts;
+
+    // cache
+    window.STATE = window.STATE || {};
+    window.STATE.regiones = regiones || [];
+
+    console.log('loadRegiones: cargadas', window.STATE.regiones.length, 'regiones');
+    return window.STATE.regiones;
+  } catch (err) {
+    console.error('Error en loadRegiones:', err);
+    return [];
+  }
+}
 
 // === Cargar catálogo de sexos y poblar los 4 selects ===
 async function loadSexos() {
@@ -185,6 +349,9 @@ async function loadSexos() {
     console.error('Error cargando sexos:', e);
   }
 }
+
+
+
 
 // ===== Formateo fecha/hora (UI) =====
 function toInputDate(v) {
@@ -304,9 +471,7 @@ function renderListInto(list, sel){
           ${convocaCargo ? `<div class="small text-muted">${convocaCargo}</div>` : ''}
           <div class="small"><i class="bi bi-person-check me-1"></i><b>Asignado a:</b> ${persona}</div>
           <div class="small"><i class="bi bi-geo-alt me-1"></i>${municipio} · ${lugar}</div>
-          <div class="mt-2">
-            ${partido ? `<span class="badge rounded-pill text-bg-light">${partido}</span>` : ''}
-          </div>
+          <div class="mt-2">${partido ? partidoPillHtml(partido) : ''}</div>
           ${x.Observaciones ? `<div class="small text-muted mt-2">${safe(x.Observaciones)}</div>` : ''}
         </div>
         <div class="card-footer d-flex gap-2">
@@ -625,7 +790,7 @@ if (btn.dataset.action === 'assign' || btn.dataset.action === 'manage') {
     /* =====================================================
        2) CARGA DE CATÁLOGOS
     ======================================================*/
-    try { await Promise.all([ loadPersonas(true), loadActores(true), loadSexos() ]); }
+    try { await Promise.all([ loadPersonas(true), loadActores(true), loadSexos(),loadRegiones() ]); }
     catch(e){ console.warn('Catálogos fallaron parcialmente:', e); }
 
     /* =====================================================
@@ -1258,16 +1423,7 @@ if (btn.id === 'btnCrear') {
     return;
   }
 
-  // ========== NUEVA PERSONA ==========
-  if (btn.id === 'btnOpenNewPersona') {
-    $('#npNombre').value = '';
-    $('#npCargo').value = '';
-    $('#npTelefono').value = '';
-    $('#npCorreo').value = '';
-    $('#npUnidad').value = '';
-    new bootstrap.Modal($('#modalNewPersona')).show();
-    return;
-  }
+
 
  // Abrir modal "Nueva persona" (puedes tener un botón que lance esto)
 if (btn.id === 'btnOpenNewPersona') {
@@ -1283,7 +1439,7 @@ if (btn.id === 'btnOpenNewPersona') {
   $('#npPartTel').value = '';
   // Sexo
   if (typeof loadSexos === 'function') { try { await loadSexos(); } catch {} }
-
+  await loadRegiones(); 
   new bootstrap.Modal(document.getElementById('modalNewPersona')).show();
   return;
 }
@@ -1299,10 +1455,12 @@ if (btn.id === 'btnGuardarPersona') {
   const correo = ($('#npCorreo').value || '').trim();
   const unidad = ($('#npUnidad').value || '').trim();
   const sexoId = ($('#npSexo').value || '').trim();
-
+  const regionId = ($('#npRegion').value || '').trim();
   const partNom = ($('#npPartNombre').value || '').trim();
   const partCar = ($('#npPartCargo').value  || '').trim();
   const partTel = ($('#npPartTel').value    || '').replace(/\D/g,'');
+
+
 
   if (!nombre || !cargo) {
     msg.textContent = 'Nombre y Cargo son obligatorios.'; msg.classList.remove('d-none');
@@ -1326,7 +1484,8 @@ if (btn.id === 'btnGuardarPersona') {
     SexoID: sexoId ? Number(sexoId) : null,
     ParticularNombre: partNom,
     ParticularCargo:  partCar,
-    ParticularTel:    partTel
+    ParticularTel:    partTel,
+    RegionID: regionId ? Number(regionId) : null
   };
 
   // UX: spinner en el botón
@@ -1359,6 +1518,172 @@ if (btn.id === 'btnGuardarPersona') {
 
   return;
 }
+// === Abrir modal "Editar persona" (versión actualizada para manejar región) ===
+  if (btn.id === 'btnEditPersonaInline' || btn.dataset.action === 'edit-persona') {
+    const pid = document.getElementById('selPersona')?.value || btn.dataset.id || '';
+    if (!pid) { alert('Selecciona una persona primero'); return; }
+    const p = catalogIndex?.[pid];
+    if (!p) { alert('Persona no encontrada'); return; }
+
+    // Cargar catálogo de regiones si no está cargado (no bloqueante si falla)
+    try { if (typeof loadRegiones === 'function') await loadRegiones(); } catch (e) { console.warn('loadRegiones falló:', e); }
+
+    // Rellenar campos existentes
+    $('#epID').value         = p.ID;
+    $('#epNombre').value     = p.Nombre || '';
+    $('#epCargo').value      = p.Cargo  || '';
+    $('#epTelefono').value   = (p['Teléfono'] || p.Telefono || '').replace(/\D/g,'');
+    $('#epCorreo').value     = p.Correo || '';
+    $('#epUnidad').value     = p['Unidad/Región'] || p.Unidad || p.unidad_region || '';
+    $('#epSexo').value       = p.SexoID ?? '';
+    $('#epActivo').checked   = (p.Activo === true || p.activo === true);
+    $('#epPartNombre').value = p.ParticularNombre || '';
+    $('#epPartCargo').value  = p.ParticularCargo  || '';
+    $('#epPartTel').value    = (p.ParticularTel || '').replace(/\D/g,'');
+
+    // Región: soporta varias propiedades que puedan venir en catalogIndex
+    const regionVal = (p.RegionID ?? p.region_id ?? p.region ?? p.regiones_id ?? '');
+    // asigna al select (si existe)
+    const epRegionEl = document.getElementById('epRegion');
+    if (epRegionEl) {
+      epRegionEl.value = regionVal !== null && regionVal !== undefined ? String(regionVal) : '';
+      // Si usas TomSelect en el select de edición, actualiza su valor también
+      try {
+        await loadPersonas(true); // refresca STATE.personas + catalogIndex
+        if (window.regionTS_edit && typeof window.regionTS_edit.setValue === 'function') {
+          // tomselect espera valor como string/number según config
+          window.regionTS_edit.setValue(regionVal ? String(regionVal) : '');
+        }
+      } catch (e) { console.warn('No se pudo setear regionTS_edit:', e); }
+    }
+
+    $('#epMsg').classList.add('d-none');
+    new bootstrap.Modal($('#modalEditPersona')).show();
+    return;
+  }
+
+  // === Guardar cambios persona
+  if (btn.id === 'btnGuardarEditPersona') {
+    const msg = $('#epMsg');
+    msg.classList.add('d-none'); msg.textContent = '';
+
+    const payload = {
+      ID:               $('#epID').value,
+      Nombre:           $('#epNombre').value.trim(),
+      Cargo:            $('#epCargo').value.trim(),
+      'Teléfono':       $('#epTelefono').value.trim(),
+      Correo:           $('#epCorreo').value.trim(),
+      'Unidad/Región':  $('#epUnidad').value.trim(),
+      SexoID:           $('#epSexo')?.value || null,
+      ParticularNombre: $('#epPartNombre').value.trim(),
+      ParticularCargo:  $('#epPartCargo').value.trim(),
+      ParticularTel:    $('#epPartTel').value.trim(),
+      RegionID:         $('#epRegion')?.value || null,
+      Activo:           $('#epActivo')?.checked ?? true
+    };
+
+    if (!payload.Nombre || !payload.Cargo) {
+      msg.textContent = 'Nombre y Cargo son obligatorios.';
+      msg.classList.remove('d-none');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/person/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
+
+      bootstrap.Modal.getInstance($('#modalEditPersona'))?.hide();
+      await loadPersonas(true); // refresca STATE.personas + catalogIndex
+      await loadCatalog();
+      await reloadUI();
+    } catch (e) {
+      msg.textContent = e.message || 'No se pudo guardar.';
+      msg.classList.remove('d-none');
+    }
+    return;
+  }
+
+// === Abrir modal "Eliminar persona"
+  if (btn.id === 'btnDeletePersonaInline' || btn.dataset.action === 'delete-persona') {
+    const pid = document.getElementById('selPersona')?.value || btn.dataset.id || '';
+    if (!pid) { alert('Selecciona una persona primero'); return; }
+
+    const p = catalogIndex?.[pid];
+    if (!p) { alert('Persona no encontrada'); return; }
+
+    $('#delPersonaId').value = p.ID;
+    $('#delPersonaName').textContent = p.Nombre || 'esta persona';
+    $('#delPersonaMsg').classList.add('d-none');
+
+    new bootstrap.Modal($('#modalDeletePersona')).show();
+    // ❌ NO LLAMES reloadUI AQUÍ
+    return;
+  }
+
+  // === Confirmar eliminación de persona
+  if (btn.id === 'btnEliminarPersonaConfirm') {
+    const msgEl = $('#delPersonaMsg');
+    msgEl.classList.add('d-none');
+    msgEl.textContent = '';
+
+    const pid = ($('#delPersonaId').value || '').trim();
+    if (!pid) {
+      msgEl.textContent = 'Falta ID.';
+      msgEl.classList.remove('d-none');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/person/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({ ID: pid })
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
+
+      // Cierra modal
+      bootstrap.Modal.getInstance($('#modalDeletePersona'))?.hide();
+
+      // 🔄 Recarga catálogo FORZANDO desde backend
+      await loadCatalog(true);
+      await loadPersonas(true); // refresca STATE.personas + catalogIndex
+      // Limpia select principal
+      const sel = document.getElementById('selPersona');
+      if (sel) {
+        sel.value = '';
+        sel.dispatchEvent(new Event('change')); // para que se limpie inpRol con tu lógica existente
+      }
+
+      if (document.getElementById('inpRol')) {
+        document.getElementById('inpRol').value = '';
+      }
+
+      // Si usas TomSelect para personas
+      if (window.personaTS) {
+        try {
+          window.personaTS.clear(true);          // limpia valor
+          window.personaTS.refreshOptions(false); // refresca opciones
+        } catch (e) {
+          console.warn('Error refrescando TomSelect:', e);
+        }
+      }
+
+      alert('Persona eliminada.');
+    } catch (e) {
+      console.error(e);
+      msgEl.textContent = e.message || 'No se pudo eliminar.';
+      msgEl.classList.remove('d-none');
+    }
+    return;
+  }
 
 
   // Filtros fechas
@@ -1707,150 +2032,7 @@ if (btn.dataset.action === 'delete-inv') {
   return;
 }
 
-// === Abrir modal "Editar persona"
-  if (btn.id === 'btnEditPersonaInline' || btn.dataset.action === 'edit-persona') {
-    const pid = document.getElementById('selPersona')?.value || btn.dataset.id || '';
-    if (!pid) { alert('Selecciona una persona primero'); return; }
-    const p = catalogIndex?.[pid];
-    if (!p) { alert('Persona no encontrada'); return; }
 
-    $('#epID').value         = p.ID;
-    $('#epNombre').value     = p.Nombre || '';
-    $('#epCargo').value      = p.Cargo  || '';
-    $('#epTelefono').value   = (p['Teléfono'] || p.Telefono || '').replace(/\D/g,'');
-    $('#epCorreo').value     = p.Correo || '';
-    $('#epUnidad').value     = p['Unidad/Región'] || p.Unidad || p.unidad_region || '';
-    $('#epSexo').value       = p.SexoID ?? '';
-    $('#epActivo').checked   = (p.Activo === true || p.activo === true);
-    $('#epPartNombre').value = p.ParticularNombre || '';
-    $('#epPartCargo').value  = p.ParticularCargo  || '';
-    $('#epPartTel').value    = (p.ParticularTel || '').replace(/\D/g,'');
-
-    $('#epMsg').classList.add('d-none');
-    new bootstrap.Modal($('#modalEditPersona')).show();
-    return;
-  }
-
-  // === Guardar cambios persona
-  if (btn.id === 'btnGuardarEditPersona') {
-    const msg = $('#epMsg');
-    msg.classList.add('d-none'); msg.textContent = '';
-
-    const payload = {
-      ID:               $('#epID').value,
-      Nombre:           $('#epNombre').value.trim(),
-      Cargo:            $('#epCargo').value.trim(),
-      'Teléfono':       $('#epTelefono').value.trim(),
-      Correo:           $('#epCorreo').value.trim(),
-      'Unidad/Región':  $('#epUnidad').value.trim(),
-      SexoID:           $('#epSexo')?.value || null,
-      ParticularNombre: $('#epPartNombre').value.trim(),
-      ParticularCargo:  $('#epPartCargo').value.trim(),
-      ParticularTel:    $('#epPartTel').value.trim(),
-      Activo:           $('#epActivo')?.checked ?? true
-    };
-
-    if (!payload.Nombre || !payload.Cargo) {
-      msg.textContent = 'Nombre y Cargo son obligatorios.';
-      msg.classList.remove('d-none');
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/person/update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'same-origin',
-        body: JSON.stringify(payload)
-      });
-      const j = await res.json();
-      if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
-
-      bootstrap.Modal.getInstance($('#modalEditPersona'))?.hide();
-      await loadCatalog();
-      await reloadUI();
-    } catch (e) {
-      msg.textContent = e.message || 'No se pudo guardar.';
-      msg.classList.remove('d-none');
-    }
-    return;
-  }
-
-// === Abrir modal "Eliminar persona"
-  if (btn.id === 'btnDeletePersonaInline' || btn.dataset.action === 'delete-persona') {
-    const pid = document.getElementById('selPersona')?.value || btn.dataset.id || '';
-    if (!pid) { alert('Selecciona una persona primero'); return; }
-
-    const p = catalogIndex?.[pid];
-    if (!p) { alert('Persona no encontrada'); return; }
-
-    $('#delPersonaId').value = p.ID;
-    $('#delPersonaName').textContent = p.Nombre || 'esta persona';
-    $('#delPersonaMsg').classList.add('d-none');
-
-    new bootstrap.Modal($('#modalDeletePersona')).show();
-    // ❌ NO LLAMES reloadUI AQUÍ
-    return;
-  }
-
-  // === Confirmar eliminación de persona
-  if (btn.id === 'btnEliminarPersonaConfirm') {
-    const msgEl = $('#delPersonaMsg');
-    msgEl.classList.add('d-none');
-    msgEl.textContent = '';
-
-    const pid = ($('#delPersonaId').value || '').trim();
-    if (!pid) {
-      msgEl.textContent = 'Falta ID.';
-      msgEl.classList.remove('d-none');
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/person/delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'same-origin',
-        body: JSON.stringify({ ID: pid })
-      });
-      const j = await res.json();
-      if (!res.ok || !j.ok) throw new Error(j.error || res.statusText);
-
-      // Cierra modal
-      bootstrap.Modal.getInstance($('#modalDeletePersona'))?.hide();
-
-      // 🔄 Recarga catálogo FORZANDO desde backend
-      await loadCatalog(true);
-
-      // Limpia select principal
-      const sel = document.getElementById('selPersona');
-      if (sel) {
-        sel.value = '';
-        sel.dispatchEvent(new Event('change')); // para que se limpie inpRol con tu lógica existente
-      }
-
-      if (document.getElementById('inpRol')) {
-        document.getElementById('inpRol').value = '';
-      }
-
-      // Si usas TomSelect para personas
-      if (window.personaTS) {
-        try {
-          window.personaTS.clear(true);          // limpia valor
-          window.personaTS.refreshOptions(false); // refresca opciones
-        } catch (e) {
-          console.warn('Error refrescando TomSelect:', e);
-        }
-      }
-
-      alert('Persona eliminada.');
-    } catch (e) {
-      console.error(e);
-      msgEl.textContent = e.message || 'No se pudo eliminar.';
-      msgEl.classList.remove('d-none');
-    }
-    return;
-  }
   // ——— Ir a la tarjeta desde el calendario/lista lateral ———
   if (btn.dataset.action === 'goto-inv' || btn.dataset.action === 'goto-card') {
     const id = btn.dataset.id;
@@ -1973,7 +2155,7 @@ window.addEventListener('resize', adjustMainPadding);
 // ===== DOM Ready =====
 document.addEventListener('DOMContentLoaded', async () => {
   try {
-    await Promise.all([ loadCatalog(), loadActores(), loadSexos(), loadPartidos() ]);
+    await Promise.all([ loadCatalog(), loadActores(), loadSexos(), loadPartidos(),loadRegiones() ]);
     await reloadUI();
     refreshCalendarUI({ preserve: true });
     renderCalendarModule();
@@ -2252,6 +2434,9 @@ if (modalNewPersonaEl) {
     const selSexo = document.getElementById('npSexo');
     if (selSexo) selSexo.value = '';
 
+    const selRegion = document.getElementById('npRegion');
+    if (selRegion) selRegion.value = '';
+
     // Limpia mensaje
     const msg = document.getElementById('npMsg');
     if (msg) msg.classList.add('d-none');
@@ -2393,6 +2578,7 @@ function renderCalendar(){
 }
 
 /* ===== Lista de eventos del día (cards compactas) ===== */
+/* ===== Lista de eventos del día (cards compactas) ===== */
 function renderDayList(dateYMD){
   const box = document.getElementById('calDayList');
   const lab = document.getElementById('calSelected');
@@ -2432,11 +2618,10 @@ function renderDayList(dateYMD){
     const hora      = x.Hora ? ` · ${x.Hora}` : '';
     const asignado  = x.PersonaNombre ? 
       ` — <span class="text-muted">${x.PersonaNombre}${x.Rol? ' ('+x.Rol+')':''}</span>` : '';
-    const partido   = (x.Partido || x.PartidoPolitico || x.Partido_Politico) ? 
-      `<span class="badge rounded-pill text-bg-light ms-1">${x.Partido || x.PartidoPolitico || x.Partido_Politico}</span>` : '';
-
-    const grupoTok  = x.GrupoToken || x.grupo_token || '';
+    const partidoRaw = (x.Partido || x.PartidoPolitico || x.Partido_Politico);
+    const partido   = partidoRaw ? partidoRaw : '';
     const subTipo   = x.SubTipo || x.sub_tipo || '';
+    const grupoTok  = x.GrupoToken || x.grupo_token || '';
     const grpClass  = getGroupClass(grupoTok, groupClassCache);
 
     // Si tiene grupo → badge + botón
@@ -2457,7 +2642,7 @@ function renderDayList(dateYMD){
         <div class="me-2">
           <div class="title">
             ${(x.Evento || 'Sin título')} 
-            ${partido}
+            ${partido ? partidoPillHtml(partido) : ''}
             ${badgeSubTipo(subTipo)}
           </div>
           <div class="meta">
@@ -2484,12 +2669,13 @@ function renderDayList(dateYMD){
     `;
   }).join('');
   
-      // asegura que tenga scroll
+  // asegura que tenga scroll
   box.classList.add('day-list');
 
   // cada vez que se renderiza, vuelve al inicio
   box.scrollTop = 0;
 }
+
 
 // Colores por grupo
 const GROUP_CLASSES = ['grp-a', 'grp-b', 'grp-c', 'grp-d', 'grp-e', 'grp-f'];
@@ -2977,23 +3163,23 @@ const MUNICIPIOS =
         "Atlacomulco", "Atlautla", "Axapusco", "Ayapango", "Calimaya",
         "Capulhuac", "Coacalco de Berriozábal", "Coatepec Harinas", "Cocotitlán",
         "Coyotepec", "Cuautitlán", "Chalco", "Chapa de Mota", "Chapultepec",
-        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Cuautitlán Izcalli", "Donato Guerra",
+        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Donato Guerra",
         "Ecatepec de Morelos", "Ecatzingo", "Huehuetoca", "Hueypoxtla", "Huixquilucan",
         "Isidro Fabela", "Ixtapaluca", "Ixtapan de la Sal", "Ixtapan del Oro",
         "Ixtlahuaca", "Xalatlaco", "Jaltenco", "Jilotepec", "Jilotzingo", "Jiquipilco",
-        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Luvianos", "Malinalco", "Melchor Ocampo",
+        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Malinalco", "Melchor Ocampo",
         "Metepec", "Mexicaltzingo", "Morelos", "Naucalpan de Juárez", "Nezahualcóyotl",
         "Nextlalpan", "Nicolás Romero", "Nopaltepec", "Ocoyoacac", "Ocuilan",
         "El Oro", "Otumba", "Otzoloapan", "Otzolotepec", "Ozumba", "Papalotla",
-        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San José del Rincón", "San Felipe del Progreso",
+        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San Felipe del Progreso",
         "San Martín de las Pirámides", "San Mateo Atenco", "San Simón de Guerrero",
         "Santo Tomás", "Soyaniquilpan de Juárez", "Sultepec", "Tecámac", "Tejupilco",
         "Temamatla", "Temascalapa", "Temascalcingo", "Temascaltepec", "Temoaya",
         "Tenancingo", "Tenango del Aire", "Tenango del Valle", "Teoloyucan", "Teotihuacán",
         "Tepetlaoxtoc", "Tepetlixpa", "Tepotzotlán", "Tequixquiac", "Texcaltitlán",
-        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tonanitla", "Tlalmanalco",
+        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tlalmanalco",
         "Tlalnepantla de Baz", "Tlatlaya", "Toluca", "Tonatico", "Tultepec", "Tultitlán",
-        "Valle de Bravo", "Valle de Chalco Solidaridad", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
+        "Valle de Bravo", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
         "Villa Victoria", "Xonacatlán", "Zacazonapan", "Zacualpan", "Zinacantepec",
         "Zumpahuacán", "Zumpango"
 ];
@@ -3446,6 +3632,7 @@ function normalizeMunicipioKey(s) {
   } catch (e) {}
   return t.toLowerCase();
 }
+
 
 /**
  * bootstrapRegionCache()
@@ -4076,7 +4263,14 @@ window.MUNICIPIOS_MODULE = window.MUNICIPIOS_MODULE || (function(){
 
       // asegúrate CSS: #regMap{height:...}
       M.map = L.map(containerId, { preferCanvas: true }).setView([19.3, -99.6], 9);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', maxZoom: 18 }).addTo(M.map);
+      L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        {
+          attribution: '&copy; OpenStreetMap &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }
+      ).addTo(M.map);
 
       // crea polygonsLayer con style dinámico
       M.polygonsLayer = L.geoJSON(null, {
@@ -4287,6 +4481,7 @@ window.MUNICIPIOS_MODULE = window.MUNICIPIOS_MODULE || (function(){
 
   return M;
 })();
+
 
 
 
