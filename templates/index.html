@@ -168,16 +168,16 @@
 
     <!-- Acciones -->
     <div class="ms-auto d-flex flex-wrap gap-2">
-      <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewPersona" type="button">
+      <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewPersona" type="button" data-roles="admin">
         <i class="bi bi-person-plus me-1"></i> Representante GEM
       </button>
-      <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewActor" type="button">
+      <button class="btn btn-dark btn-sm" data-bs-toggle="modal" data-bs-target="#modalNewActor" type="button" data-roles="admin">
         <i class="bi bi-person-gear me-1"></i> PM
       </button>
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCreate" type="button">
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCreate" type="button" data-roles="admin">
         <i class="bi bi-plus-lg me-1"></i> Nueva invitación
       </button>
-      <button id="btnExportXlsx" class="btn btn-outline-success btn-sm" type="button">
+      <button id="btnExportXlsx" class="btn btn-outline-success btn-sm" type="button" data-roles="admin,viewer">
         <i class="bi bi-file-earmark-spreadsheet me-1"></i> Exportar XLSX
       </button>
     </div>
@@ -693,6 +693,15 @@
     <div class="modal-body">
       <input type="hidden" id="epID">
 
+      <!-- Región (opcional) -->
+      <div class="mb-2">
+        <label class="form-label">Región (opcional)</label>
+        <select id="epRegion" class="form-select">
+          <option value="">— Ninguna —</option>
+          <!-- Se llenará via loadRegiones() -->
+        </select>
+      </div>
+
       <div class="mb-2">
         <label class="form-label">Nombre</label>
         <input id="epNombre" class="form-control" placeholder="Nombre completo">
@@ -724,7 +733,7 @@
           <label class="form-label">Sexo</label>
           <select id="epSexo" class="form-select">
             <option value="">—</option>
-            <!-- llena con tu catálogo de sexos (SexoID) -->
+            <!-- Se llena con loadSexos() -->
           </select>
         </div>
         <div class="col-6 d-flex align-items-end">
@@ -737,6 +746,7 @@
 
       <hr class="my-3">
       <div class="small text-muted mb-1">Particular (obligatorio)</div>
+
       <div class="row g-2">
         <div class="col-4">
           <label class="form-label">Nombre</label>
@@ -760,6 +770,7 @@
     </div>
   </div></div>
 </div>
+
 <!-- =========================
      Modal: Eliminar persona
 ========================= -->
@@ -801,6 +812,14 @@
       <div id="npMsg" class="alert alert-danger d-none small mb-2"></div>
 
       <div class="row g-2">
+        <!-- Región (opcional) - agregar dentro de modalNewPersona -->
+        <div class="mt-2">
+          <label class="form-label">Región (opcional)</label>
+          <select id="npRegion" class="form-select">
+            <option value="">— Ninguna —</option>
+            <!-- se llenará vía JS -->
+          </select>
+        </div>
         <div class="col-md-7">
           <label class="form-label">Nombre *</label>
           <input id="npNombre" class="form-control" autocomplete="off">
@@ -831,7 +850,7 @@
       </div>
 
       <div class="mt-2">
-        <label class="form-label">Unidad/Región/Secretaría</label>
+        <label class="form-label">Unidad/Secretaría</label>
         <input id="npUnidad" class="form-control" autocomplete="off">
       </div>
 
