@@ -37,6 +37,7 @@ from io import BytesIO
 import pandas as pd
 from flask import send_file
 from datetime import timedelta, datetime as _dt  # asegúrate de tener esto importado
+
 # =============================================================================
 # Config App + Templates
 # =============================================================================
@@ -89,16 +90,69 @@ def get_user_from_token() -> Optional[Usuario]:
     finally:
         db.close()
 
-def auth_required(fn: Callable):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        u = get_user_from_token()
-        if not u:
-            # Para APIs: 401 JSON; para páginas, redirigiría.
-            return jsonify({"ok": False, "error": "No autorizado"}), 401
-        g.user = u
-        return fn(*args, **kwargs)
-    return wrapper
+# Helper pequeño: convierte input roles a set o None
+def _normalize_roles(roles):
+    if roles is None:
+        return None
+    if isinstance(roles, (list, tuple, set)):
+        return set(map(str, roles))
+    # si se pasa string: "admin,editor"
+    if isinstance(roles, str):
+        return set([r.strip() for r in roles.split(',') if r.strip()])
+    return None
+
+def auth_required(roles=None):
+    """
+    Decorador que puede usarse sin argumentos:
+      @auth_required
+    o con roles:
+      @auth_required(['admin','editor'])
+    o con string:
+      @auth_required('admin,editor')
+
+    Si el usuario no está autenticado -> 401 JSON.
+    Si no tiene rol permitido -> 403 JSON.
+    Adjunta el usuario en g.current_user (y también g.user por compatibilidad).
+    """
+    allowed = _normalize_roles(roles)
+
+    # Si se usó como @auth_required sin paréntesis, `roles` será la función.
+    if callable(roles):
+        # roles no fue pasado, roles==function, devolvemos wrapper directo
+        fn = roles
+        allowed = None
+        @wraps(fn)
+        def wrapper_no_roles(*args, **kwargs):
+            u = get_user_from_token()
+            if not u:
+                return jsonify({"ok": False, "error": "No autorizado"}), 401
+            g.current_user = u
+            g.user = u  # compatibilidad con código antiguo
+            return fn(*args, **kwargs)
+        return wrapper_no_roles
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            u = get_user_from_token()
+            if not u:
+                return jsonify({"ok": False, "auth": False, "error": "No autorizado"}), 401
+            # attach user
+            g.current_user = u
+            g.user = u
+
+            # role check
+            if allowed:
+                try:
+                    user_role = (u.rol or u.role or '').strip()
+                except Exception:
+                    user_role = ''
+                if user_role not in allowed:
+                    return jsonify({"ok": False, "error": "Prohibido - rol de solo vista"}), 403
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
 MUNICIPIOS_EDOMEX = [
     # 👇 pega aquí los 125 nombres oficiales exactamente como los muestras al usuario
         "Acambay de Ruíz Castañeda", "Acolman", "Aculco", "Almoloya de Alquisiras",
@@ -107,23 +161,23 @@ MUNICIPIOS_EDOMEX = [
         "Atlacomulco", "Atlautla", "Axapusco", "Ayapango", "Calimaya",
         "Capulhuac", "Coacalco de Berriozábal", "Coatepec Harinas", "Cocotitlán",
         "Coyotepec", "Cuautitlán", "Chalco", "Chapa de Mota", "Chapultepec",
-        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Cuautitlán Izcalli", "Donato Guerra",
+        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Donato Guerra",
         "Ecatepec de Morelos", "Ecatzingo", "Huehuetoca", "Hueypoxtla", "Huixquilucan",
         "Isidro Fabela", "Ixtapaluca", "Ixtapan de la Sal", "Ixtapan del Oro",
         "Ixtlahuaca", "Xalatlaco", "Jaltenco", "Jilotepec", "Jilotzingo", "Jiquipilco",
-        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Luvianos", "Malinalco", "Melchor Ocampo",
+        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Malinalco", "Melchor Ocampo",
         "Metepec", "Mexicaltzingo", "Morelos", "Naucalpan de Juárez", "Nezahualcóyotl",
         "Nextlalpan", "Nicolás Romero", "Nopaltepec", "Ocoyoacac", "Ocuilan",
         "El Oro", "Otumba", "Otzoloapan", "Otzolotepec", "Ozumba", "Papalotla",
-        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San José del Rincón", "San Felipe del Progreso",
+        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San Felipe del Progreso",
         "San Martín de las Pirámides", "San Mateo Atenco", "San Simón de Guerrero",
         "Santo Tomás", "Soyaniquilpan de Juárez", "Sultepec", "Tecámac", "Tejupilco",
         "Temamatla", "Temascalapa", "Temascalcingo", "Temascaltepec", "Temoaya",
         "Tenancingo", "Tenango del Aire", "Tenango del Valle", "Teoloyucan", "Teotihuacán",
         "Tepetlaoxtoc", "Tepetlixpa", "Tepotzotlán", "Tequixquiac", "Texcaltitlán",
-        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tonanitla", "Tlalmanalco",
+        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tlalmanalco",
         "Tlalnepantla de Baz", "Tlatlaya", "Toluca", "Tonatico", "Tultepec", "Tultitlán",
-        "Valle de Bravo", "Valle de Chalco Solidaridad", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
+        "Valle de Bravo", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
         "Villa Victoria", "Xonacatlán", "Zacazonapan", "Zacualpan", "Zinacantepec",
         "Zumpahuacán", "Zumpango"
     # ... (resto de municipios) ...
@@ -469,13 +523,13 @@ def api_me():
     u = get_user_from_token()
     if not u:
         return jsonify({"ok": False, "auth": False}), 200
-    return jsonify({"ok": True, "auth": True, "usuario": u.usuario, "rol": u.rol})
+    return jsonify({"ok": True, "auth": True, "id": u.id, "usuario": u.usuario, "rol": u.rol})
 
 # =============================================================================
 # Catálogos
 # =============================================================================
 @app.get("/api/partidos")
-@auth_required
+@auth_required(['admin'])
 def api_partidos():
     db = SessionLocal()
     try:
@@ -487,7 +541,7 @@ def api_partidos():
         db.close()
 
 @app.get("/api/catalogo/sexo")
-@auth_required
+@auth_required(['admin'])
 def api_catalogo_sexo():
     db = SessionLocal()
     try:
@@ -500,7 +554,7 @@ def api_catalogo_sexo():
 # Personas
 # =============================================================================
 @app.get("/api/invitaciones/by_persona")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_invitaciones_by_persona():
     """
     Parámetros (query):
@@ -568,7 +622,7 @@ def api_invitaciones_by_persona():
         db.close()
         
 @app.get("/api/catalog")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_catalog():
     qtxt = (request.args.get("q") or "").strip().lower()
     db = SessionLocal()
@@ -624,13 +678,30 @@ def api_catalog():
         db.close()
 
 @app.get("/api/personas")
-@auth_required
+@auth_required(['admin','viewer'])   # cambia a ['admin'] si quieres permitir solo admin
 def api_personas():
     db = SessionLocal()
     try:
-        rows = db.query(Persona).order_by(Persona.nombre.asc()).all()
+        # Intentamos usar joinedload si la relación Persona.region está definida en tu modelo
+        try:
+            rows = db.query(Persona).options(joinedload(Persona.region)).order_by(Persona.nombre.asc()).all()
+        except Exception:
+            # Si no existe la relación, fallback a consulta sin joinedload
+            rows = db.query(Persona).order_by(Persona.nombre.asc()).all()
+
         out = []
         for p in rows:
+            # obtener region_id directo
+            region_id = getattr(p, 'region_id', None)
+
+            # intentar obtener nombre de region desde relación si existe
+            region_nombre = None
+            try:
+                if getattr(p, 'region', None):
+                    region_nombre = getattr(p.region, 'nombre', None)
+            except Exception:
+                region_nombre = None
+
             out.append({
                 "ID": p.id,
                 "Nombre": p.nombre or "",
@@ -643,13 +714,16 @@ def api_personas():
                 "ParticularCargo":  p.particular_cargo  or "",
                 "ParticularTel":    p.particular_tel    or "",
                 "Activo": bool(p.activo),
+                # campos nuevos para frontend
+                "RegionID": region_id,
+                "RegionNombre": region_nombre
             })
         return jsonify(out)
     finally:
         db.close()
 
 @app.post("/api/person/create")
-@auth_required
+@auth_required(['admin'])
 def api_person_create():
     data = request.get_json() or {}
 
@@ -664,6 +738,10 @@ def api_person_create():
 
     telefono     = _digits(data.get("Teléfono") or data.get("Telefono"))
     particular_t = _digits(data.get("ParticularTel"))
+    
+    # Región (opcional)
+    region_raw = data.get("RegionID")
+    region_id = int(region_raw) if str(region_raw).isdigit() else None
 
     db = SessionLocal()
     try:
@@ -677,6 +755,7 @@ def api_person_create():
             particular_nombre=(data.get("ParticularNombre") or "").strip(),
             particular_cargo=(data.get("ParticularCargo") or "").strip(),
             particular_tel=particular_t,
+            region_id=region_id,  # ← NUEVO
             activo=True
         )
         db.add(p)
@@ -689,7 +768,7 @@ def api_person_create():
         db.close()
 
 @app.post("/api/person/update")
-@auth_required
+@auth_required(['admin'])
 def api_person_update():
     import re
     data = request.get_json() or {}
@@ -725,6 +804,10 @@ def api_person_update():
         p.particular_nombre = (data.get("ParticularNombre") or "").strip()
         p.particular_cargo  = (data.get("ParticularCargo")  or "").strip()
         p.particular_tel    = digits(data.get("ParticularTel") or "")
+        
+        # Región opcional
+        reg_raw = data.get("RegionID")
+        p.region_id = int(reg_raw) if str(reg_raw).isdigit() else None
 
         # Activo (checkbox)
         if "Activo" in data:
@@ -739,7 +822,7 @@ def api_person_update():
         db.close()
 
 @app.post("/api/person/delete")
-@auth_required
+@auth_required(['admin'])
 def api_person_delete():
     data = request.get_json() or {}
     pid  = data.get("ID") or data.get("id")
@@ -795,7 +878,7 @@ def api_person_delete():
         
 # Lista de regiones (para poblar #regRegion)
 @app.get("/api/regiones")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_regiones_list():
     db = SessionLocal()
     try:
@@ -807,7 +890,7 @@ def api_regiones_list():
 
 # Personas por region_id
 @app.get("/api/regiones/<int:region_id>/personas")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_regiones_personas(region_id):
     db = SessionLocal()
     try:
@@ -840,7 +923,7 @@ def api_regiones_personas(region_id):
 
 # ---- Region: todos los municipios (cache cliente) ----
 @app.get("/api/region_municipios_all")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_region_municipios_all():
     db = SessionLocal()
     try:
@@ -875,7 +958,7 @@ def _normalize_muni_key(s: str) -> str:
     return t.casefold()
 
 @app.get("/api/personas/recomendadas")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_personas_recomendadas():
     """
     GET /api/personas/recomendadas?municipio=Aculco
@@ -949,7 +1032,7 @@ def api_personas_recomendadas():
 # Actores
 # =============================================================================
 @app.get("/api/actores")
-@auth_required
+@auth_required(['admin'])
 def api_actores_list():
     q = (request.args.get("q") or "").strip().lower()
     db = SessionLocal()
@@ -979,7 +1062,7 @@ def api_actores_list():
         db.close()
 
 @app.post("/api/actor/create")
-@auth_required
+@auth_required(['admin'])
 def api_actor_create():
     data = request.get_json() or {}
     nombre = (data.get("Nombre") or "").strip()
@@ -1009,7 +1092,7 @@ def api_actor_create():
         db.close()
 
 @app.post("/api/actor/update")
-@auth_required
+@auth_required(['admin'])
 def api_actor_update():
     data = request.get_json() or {}
     actor_id = data.get("id")
@@ -1042,7 +1125,7 @@ def api_actor_update():
 
 # ===== Eliminar actor (bloqueado si tiene invitaciones) =====
 @app.delete("/api/actor/delete/<int:actor_id>")
-@auth_required
+@auth_required(['admin'])
 def api_actor_delete(actor_id: int):
     db = SessionLocal()
     try:
@@ -1084,7 +1167,7 @@ def api_actor_delete(actor_id: int):
 # Invitaciones
 # =============================================================================
 @app.get("/api/invitations")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_invitations_list():
     db = SessionLocal()
     try:
@@ -1251,7 +1334,7 @@ def allowed_file(filename: str) -> bool:
 
 # ---- Crear invitación (solo actor_id obligatorio en tu flujo actual) ----
 @app.post("/api/invitation/create")
-@auth_required
+@auth_required(['admin'])
 def api_invitation_create():
     db = SessionLocal()
     try:
@@ -1349,7 +1432,7 @@ def api_invitation_create():
 
 
 @app.get("/api/invitation/<id>/archivo")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_invitation_get_file(id):
     db = SessionLocal()
     try:
@@ -1378,7 +1461,7 @@ def api_invitation_get_file(id):
         
 # Endpoint: Editar invitación
 @app.post("/api/invitation/update")
-@auth_required
+@auth_required(['admin'])
 def api_invitation_update():
     from datetime import datetime as dt, date
     import unicodedata
@@ -1565,7 +1648,7 @@ def api_invitation_update():
 
   
 @app.delete("/api/invitation/delete/<id>")
-@auth_required
+@auth_required(['admin'])
 def api_invitation_delete(id):
     db = SessionLocal()
     try:
@@ -1586,7 +1669,7 @@ def api_invitation_delete(id):
 # Asignación (PARCHADO)
 # =============================================================================
 @app.post("/api/assign")
-@auth_required
+@auth_required(['admin'])
 def api_assign():
     data = request.get_json() or {}
 
@@ -1932,7 +2015,7 @@ def add_notif_for(
 
        
 @app.get("/api/notificaciones/<inv_id>")
-@auth_required
+@auth_required(['admin'])
 def api_notif_by_inv(inv_id):
     db = SessionLocal()
     try:
@@ -1979,7 +2062,7 @@ def api_notif_by_inv(inv_id):
         db.close()
         
 @app.get("/api/report/confirmados.xlsx")
-@auth_required
+@auth_required(['admin','viewer'])
 def api_export_invitaciones_xlsx():
     """
     Exporta invitaciones con columnas:
@@ -2066,7 +2149,7 @@ def api_export_invitaciones_xlsx():
         
 # GET /api/invitaciones/updates?since=2025-11-12T10:00:00
 @app.get("/api/invitaciones/updates")
-@auth_required
+@auth_required(['admin'])
 def api_invitaciones_updates():
     from datetime import datetime as dt
     since = (request.args.get("since") or "").strip()
