@@ -2060,21 +2060,62 @@ def api_notif_by_inv(inv_id):
         return jsonify(out)
     finally:
         db.close()
-        
+
+
 @app.get("/api/report/confirmados.xlsx")
 @auth_required(['admin','viewer'])
 def api_export_invitaciones_xlsx():
     """
-    Exporta invitaciones con columnas:
-    Municipio, Partido Político, Quien Convoca/Actor, Cargo Actor,
-    Asignado/Persona, Cargo Persona, Unidad/Región, Fecha, Lugar, Hora, Quien convoca
-    - 'Quien convoca' viene de Invitacion.convoca (select de la invitación)
-    - 'Quien Convoca/Actor' y 'Cargo Actor' vienen de la tabla Actores
-    - 'Asignado/Persona', 'Cargo Persona' y 'Unidad/Región' vienen de la tabla Personas
+    Exporta invitaciones e intenta mapear municipio -> región (columna "Región").
+    Matching strategy:
+      - normaliza both sides (lower, quitar tildes, collapse spaces)
+      - exact match by normalized name
+      - contains / startsWith fallback
+      - reportar municipios no mapeados para que puedas revisar
     """
     db = SessionLocal()
     try:
-        # Traemos ENTIDADES completas para poder leer atributos con fallback
+        def normalize_name(s):
+            if not s:
+                return ""
+            s = str(s).strip().lower()
+            s = unicodedata.normalize('NFD', s)
+            s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+            s = ' '.join(s.split())
+            return s
+
+        # --- cargar regiones (nombre por id) ---
+        region_names = {}
+        try:
+            regs = db.query(Region).all()
+            for r in regs:
+                region_names[getattr(r, 'id')] = getattr(r, 'nombre', '') or ''
+        except Exception:
+            region_names = {}
+
+        # --- construir mapeo municipio_normalizado -> region_id leyendo la tabla region_municipios ---
+        muni_to_region = {}
+        try:
+            # lee filas si la tabla existe
+            q = text("SELECT region_id, municipio FROM region_municipios")
+            rows = db.execute(q).fetchall()
+            for row in rows:
+                # row puede ser RowMapping o tuple
+                try:
+                    region_id = row['region_id'] if 'region_id' in row.keys() else row[0]
+                    muni_raw  = row['municipio']   if 'municipio'   in row.keys() else row[1]
+                except Exception:
+                    # fallback tuple
+                    region_id = row[0]
+                    muni_raw = row[1]
+                key = normalize_name(muni_raw)
+                if key:
+                    muni_to_region[key] = int(region_id) if region_id is not None else None
+        except Exception:
+            # tabla no existe o error -> mapa vacío
+            muni_to_region = {}
+
+        # --- Traer invitaciones (con persona y actor) ---
         rows = (
             db.query(Invitacion, Persona, Actor)
               .outerjoin(Persona, Persona.id == Invitacion.persona_id)
@@ -2085,39 +2126,84 @@ def api_export_invitaciones_xlsx():
               .all()
         )
 
-        def fmt_d(d):
-            return d.strftime("%Y-%m-%d") if d else ""
-
-        def fmt_t(t):
-            return t.strftime("%H:%M") if t else ""
+        def fmt_d(d): return d.strftime("%Y-%m-%d") if d else ""
+        def fmt_t(t): return t.strftime("%H:%M") if t else ""
 
         out = []
+        unmatched = {}  # muni_norm -> set of raw municipality examples (to inspect)
+        # Precompute sorted keys for fuzzy checks (longer keys first to prefer specific names)
+        muni_keys = sorted(muni_to_region.keys(), key=lambda x: -len(x))
+
         for inv, per, act in rows:
-            # Fallback para unidad/región de la persona
-            unidad = None
-            if per:
-                unidad = (
-                    getattr(per, "unidad", None)
-                    or getattr(per, "region", None)
-                    or getattr(per, "unidad_region", None)
-                )
+            municipio_raw = (inv.municipio or "").strip()
+            muni_norm = normalize_name(municipio_raw)
+
+            region_id = None
+            region_nombre = None
+
+            # 1) match exact
+            if muni_norm and muni_norm in muni_to_region:
+                region_id = muni_to_region[muni_norm]
+                region_nombre = region_names.get(region_id) if region_id is not None else None
+
+            # 2) fallback: buscar key del mapa que contenga muni_norm (preferir claves largas)
+            if region_id is None and muni_norm:
+                for k in muni_keys:
+                    # si el key contiene el valor normalizado (ej. "toluca" in "municipio de toluca")
+                    if k.find(muni_norm) != -1:
+                        region_id = muni_to_region.get(k)
+                        region_nombre = region_names.get(region_id) if region_id is not None else None
+                        break
+
+            # 3) fallback inverso: la muni_norm contiene alguna key (ej. muni_norm "san mateo atenco" contiene "mateo atenco")
+            if region_id is None and muni_norm:
+                for k in muni_keys:
+                    if muni_norm.find(k) != -1:
+                        region_id = muni_to_region.get(k)
+                        region_nombre = region_names.get(region_id) if region_id is not None else None
+                        break
+
+            # 4) fallback: si persona asignada tiene region_id, usarlo
+            if region_id is None and per is not None:
+                try:
+                    rpid = getattr(per, "region_id", None)
+                    if rpid:
+                        region_id = int(rpid)
+                        region_nombre = region_names.get(region_id) if region_id is not None else None
+                except Exception:
+                    pass
+
+            # 5) si aún no hay region_nombre, intentar unidad_region textual de persona
+            if not region_nombre and per is not None:
+                unidad_txt = getattr(per, "unidad_region", None)
+                if unidad_txt:
+                    region_nombre = unidad_txt
+
+            # registrar unmatched para diagnóstico si no encontramos region
+            if not region_nombre:
+                if muni_norm not in unmatched:
+                    unmatched[muni_norm] = set()
+                unmatched[muni_norm].add(municipio_raw)
 
             out.append({
-                "Municipio":             inv.municipio or "",
+                "Municipio":             municipio_raw or "",
+                "Región":                region_nombre or "",
                 "Partido Político":      inv.partido_politico or "",
                 "Quien Convoca/Actor":   (act.nombre if act else "") or "",
                 "Cargo Actor":           (act.cargo  if act else "") or "",
                 "Asignado/Persona":      (per.nombre if per else "") or "",
                 "Cargo Persona":         (per.cargo  if per else "") or "",
-                "Unidad/Región":         unidad or "",
+                "Unidad/Región":         (getattr(per, "unidad_region", None) or "") or "",
                 "Fecha":                 fmt_d(inv.fecha),
                 "Lugar":                 inv.lugar or "",
                 "Hora":                  fmt_t(inv.hora),
                 "Quien convoca":         inv.convoca or "",
             })
 
+        # --- Crear DataFrame principal ---
         df = pd.DataFrame(out, columns=[
             "Municipio",
+            "Región",
             "Partido Político",
             "Quien Convoca/Actor",
             "Cargo Actor",
@@ -2130,9 +2216,22 @@ def api_export_invitaciones_xlsx():
             "Quien convoca",
         ])
 
+        # --- (Opcional) generar hoja con municipios no mapeados para diagnosticar ---
+        # convierte unmatched sets a lista ordenada
+        unmatched_list = []
+        for k, s in unmatched.items():
+            unmatched_list.append({
+                "municipio_normalizado": k,
+                "ejemplos_raw": "; ".join(sorted(s))
+            })
+        df_unmatched = pd.DataFrame(unmatched_list)
+
         bio = BytesIO()
         with pd.ExcelWriter(bio, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Invitaciones")
+            # solo escribe hoja de unmatched si hay datos
+            if not df_unmatched.empty:
+                df_unmatched.to_excel(writer, index=False, sheet_name="Municipios_no_mapeados")
         bio.seek(0)
 
         filename = f"invitaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -2146,6 +2245,7 @@ def api_export_invitaciones_xlsx():
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
         db.close()
+
         
 # GET /api/invitaciones/updates?since=2025-11-12T10:00:00
 @app.get("/api/invitaciones/updates")
