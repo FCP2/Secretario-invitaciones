@@ -2068,10 +2068,10 @@ def api_export_invitaciones_xlsx():
     """
     Exporta invitaciones e intenta mapear municipio -> región (columna "Región").
     Matching strategy:
-      - normaliza both sides (lower, quitar tildes, collapse spaces)
+      - normaliza ambos lados (lower, quitar tildes, collapse spaces)
       - exact match by normalized name
       - contains / startsWith fallback
-      - reportar municipios no mapeados para que puedas revisar
+      - registra/expone municipios no mapeados en hoja adicional para diagnóstico
     """
     db = SessionLocal()
     try:
@@ -2084,28 +2084,26 @@ def api_export_invitaciones_xlsx():
             s = ' '.join(s.split())
             return s
 
-        # --- cargar regiones (nombre por id) ---
+        # --- cargar nombres de regiones (id -> nombre) ---
         region_names = {}
         try:
             regs = db.query(Region).all()
             for r in regs:
                 region_names[getattr(r, 'id')] = getattr(r, 'nombre', '') or ''
         except Exception:
+            # si no existe Region/tabla, seguir con vacio
             region_names = {}
 
-        # --- construir mapeo municipio_normalizado -> region_id leyendo la tabla region_municipios ---
+        # --- construir mapeo municipio_normalizado -> region_id leyendo region_municipios ---
         muni_to_region = {}
         try:
-            # lee filas si la tabla existe
             q = text("SELECT region_id, municipio FROM region_municipios")
             rows = db.execute(q).fetchall()
             for row in rows:
-                # row puede ser RowMapping o tuple
                 try:
                     region_id = row['region_id'] if 'region_id' in row.keys() else row[0]
                     muni_raw  = row['municipio']   if 'municipio'   in row.keys() else row[1]
                 except Exception:
-                    # fallback tuple
                     region_id = row[0]
                     muni_raw = row[1]
                 key = normalize_name(muni_raw)
@@ -2130,9 +2128,8 @@ def api_export_invitaciones_xlsx():
         def fmt_t(t): return t.strftime("%H:%M") if t else ""
 
         out = []
-        unmatched = {}  # muni_norm -> set of raw municipality examples (to inspect)
-        # Precompute sorted keys for fuzzy checks (longer keys first to prefer specific names)
-        muni_keys = sorted(muni_to_region.keys(), key=lambda x: -len(x))
+        unmatched = {}  # muni_norm -> set of raw municipality examples
+        muni_keys = sorted(muni_to_region.keys(), key=lambda x: -len(x))  # claves largas primero
 
         for inv, per, act in rows:
             municipio_raw = (inv.municipio or "").strip()
@@ -2146,16 +2143,15 @@ def api_export_invitaciones_xlsx():
                 region_id = muni_to_region[muni_norm]
                 region_nombre = region_names.get(region_id) if region_id is not None else None
 
-            # 2) fallback: buscar key del mapa que contenga muni_norm (preferir claves largas)
+            # 2) fallback: buscar key del mapa que contenga muni_norm
             if region_id is None and muni_norm:
                 for k in muni_keys:
-                    # si el key contiene el valor normalizado (ej. "toluca" in "municipio de toluca")
                     if k.find(muni_norm) != -1:
                         region_id = muni_to_region.get(k)
                         region_nombre = region_names.get(region_id) if region_id is not None else None
                         break
 
-            # 3) fallback inverso: la muni_norm contiene alguna key (ej. muni_norm "san mateo atenco" contiene "mateo atenco")
+            # 3) fallback inverso: muni_norm contiene alguna key
             if region_id is None and muni_norm:
                 for k in muni_keys:
                     if muni_norm.find(k) != -1:
@@ -2163,7 +2159,7 @@ def api_export_invitaciones_xlsx():
                         region_nombre = region_names.get(region_id) if region_id is not None else None
                         break
 
-            # 4) fallback: si persona asignada tiene region_id, usarlo
+            # 4) fallback: persona asignada tiene region_id
             if region_id is None and per is not None:
                 try:
                     rpid = getattr(per, "region_id", None)
@@ -2173,13 +2169,13 @@ def api_export_invitaciones_xlsx():
                 except Exception:
                     pass
 
-            # 5) si aún no hay region_nombre, intentar unidad_region textual de persona
+            # 5) fallback: unidad_region texto de persona
             if not region_nombre and per is not None:
                 unidad_txt = getattr(per, "unidad_region", None)
                 if unidad_txt:
                     region_nombre = unidad_txt
 
-            # registrar unmatched para diagnóstico si no encontramos region
+            # si no encontramos region, registramos para diagnostico
             if not region_nombre:
                 if muni_norm not in unmatched:
                     unmatched[muni_norm] = set()
@@ -2216,8 +2212,7 @@ def api_export_invitaciones_xlsx():
             "Quien convoca",
         ])
 
-        # --- (Opcional) generar hoja con municipios no mapeados para diagnosticar ---
-        # convierte unmatched sets a lista ordenada
+        # --- Hoja de diagnostico: municipios no mapeados ---
         unmatched_list = []
         for k, s in unmatched.items():
             unmatched_list.append({
@@ -2226,25 +2221,40 @@ def api_export_invitaciones_xlsx():
             })
         df_unmatched = pd.DataFrame(unmatched_list)
 
+        # --- Generar Excel en memoria ---
         bio = BytesIO()
-        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Invitaciones")
-            # solo escribe hoja de unmatched si hay datos
-            if not df_unmatched.empty:
-                df_unmatched.to_excel(writer, index=False, sheet_name="Municipios_no_mapeados")
-        bio.seek(0)
+        try:
+            with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False, sheet_name="Invitaciones")
+                if not df_unmatched.empty:
+                    df_unmatched.to_excel(writer, index=False, sheet_name="Municipios_no_mapeados")
+            bio.seek(0)
+        except Exception:
+            app_ctx.logger.exception("Error generando Excel con pandas/openpyxl.")
+            return jsonify({"ok": False, "error": "Error generando Excel en servidor."}), 500
 
         filename = f"invitaciones_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        return send_file(
-            bio,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            as_attachment=True,
-            download_name=filename
-        )
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        try:
+            resp = send_file(
+                bio,
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                as_attachment=True,
+                download_name=filename
+            )
+            # Exponer header si usas fetch cross-origin
+            resp.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            return resp
+        except Exception:
+            app_ctx.logger.exception("Error devolviendo send_file.")
+            return jsonify({"ok": False, "error": "Error preparando la respuesta de descarga."}), 500
+
+    except Exception:
+        app_ctx.logger.exception("Error en api_export_invitaciones_xlsx (general).")
+        return jsonify({"ok": False, "error": "Error interno del servidor. Revisa logs."}), 500
     finally:
         db.close()
+
 
         
 # GET /api/invitaciones/updates?since=2025-11-12T10:00:00
