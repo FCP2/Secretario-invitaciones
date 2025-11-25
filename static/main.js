@@ -49,71 +49,130 @@ function partidoPillHtml(partido) {
   return `<span class="badge rounded-pill" style="background:${color}; color:${textColor}; font-weight:600;">${safeText}</span>`;
 }
 
-
-//HELPERS ROL========
-// Handler para exportar XLSX — usar async/await y manejo robusto
-async function handleExportXlsx(btn) {
-  // botón y estado visual
-  btn.disabled = true;
-  const prevHTML = btn.innerHTML;
-  btn.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i> Generando...';
-
-  try {
-    // construir params (igual que ya tienes)
-    const params = new URLSearchParams();
-    const desde = (document.getElementById('fDesde')?.value || '').trim();
-    const hasta = (document.getElementById('fHasta')?.value || '').trim();
-    if (desde) params.set('desde', desde);
-    if (hasta) params.set('hasta', hasta);
-    const estatus = document.querySelector('#statusBtns .btn.active')?.dataset.status || '';
-    if (estatus) params.set('estatus', estatus);
-
-    const qs = params.toString();
-    const url = '/api/report/confirmados.xlsx' + (qs ? ('?' + qs) : '');
-
-    // fetch con include para credenciales; captura body con posible HTML/JSON de error
-    const res = await fetch(url, { credentials: 'include' });
-
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok) {
-      let detail = `${res.status} ${res.statusText}`;
-      try {
-        if (contentType.includes('application/json')) {
-          const j = await res.json();
-          detail = j?.error || j?.message || detail;
-        } else {
-          const txt = await res.text();
-          detail = txt ? txt.slice(0, 2000) : detail; // truncar si es HTML largo
-        }
-      } catch (err) {
-        console.warn('No se pudo parsear body de error:', err);
-      }
-      throw new Error(detail);
-    }
-
-    // leer blob y forzar descarga
-    const blob = await res.blob();
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const hoy = new Date().toISOString().slice(0, 10);
-    a.href = href;
-    a.download = `invitaciones_${hoy}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(href);
-
-  } catch (err) {
-    console.error('❌ Error exportando:', err);
-    // intenta mostrar mensaje útil al usuario (truncado para no romper alert)
-    const msg = (err && err.message) ? String(err.message).slice(0, 2000) : 'Error desconocido';
-    alert('No se pudo generar el archivo.\n' + msg);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = prevHTML;
-  }
+// normalizar igual que en tu módulo de municipios
+function _norm(s){
+  if(!s) return '';
+  try { return String(s).trim().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+  catch(e){ return String(s).trim().replace(/\s+/g,' ').toLowerCase(); }
 }
 
+/**
+ * loadMunicipiosSelect()
+ * - Rellena #cMuni con options tomando datos de window.MUNICIPIOS_MODULE.features o municipios.json
+ * - Inicializa TomSelect en #cMuni (window.muniTS)
+ * - Devuelve array de municipios cargados [{label, value, normal}]
+ */
+async function loadMunicipiosSelect(force=false){
+  // cache
+  window.APP = window.APP || {};
+  if (!force && Array.isArray(window.APP.municipiosList) && window.APP.municipiosList.length) {
+    _initMuniTomSelect(window.APP.municipiosList);
+    return window.APP.municipiosList;
+  }
+
+  let list = [];
+
+  // 1) Preferir datos ya parseados por tu módulo
+  if (window.MUNICIPIOS_MODULE && Array.isArray(window.MUNICIPIOS_MODULE.features) && window.MUNICIPIOS_MODULE.features.length){
+    list = window.MUNICIPIOS_MODULE.features.map(f=>{
+      const name = (f.properties && (f.properties.municipio || f.properties.Municipio)) ? (f.properties.municipio || f.properties.Municipio) : '(sin nombre)';
+      return { label: name, value: name, normal: _norm(name) };
+    });
+  } else {
+    // 2) Fallback: intentar cargar el JSON directamente
+    try {
+      const res = await fetch('/static/municipios.json', {cache:'no-store'});
+      if (res.ok){
+        const arr = await res.json();
+        list = (arr || []).map(it => {
+          const name = it.municipio || it.Municipio || it.nombre || '';
+          return { label: name, value: name, normal: _norm(name) };
+        });
+      }
+    } catch (e) {
+      console.warn('loadMunicipiosSelect: no se pudo cargar municipios.json', e);
+    }
+  }
+
+  // dedupe por normal
+  const seen = new Set();
+  const uniq = [];
+  for (const it of list){
+    if (!it || !it.normal) continue;
+    if (seen.has(it.normal)) continue;
+    seen.add(it.normal);
+    uniq.push(it);
+  }
+  window.APP.municipiosList = uniq;
+
+  _initMuniTomSelect(uniq);
+  return uniq;
+}
+
+// helper que inicializa (o reinicializa) TomSelect en #cMuni
+// normalizar igual que en tu módulo de municipios
+function _norm(s){
+  if(!s) return '';
+  try { return String(s).trim().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+  catch(e){ return String(s).trim().replace(/\s+/g,' ').toLowerCase(); }
+}
+
+/**
+ * loadMunicipiosSelect()
+ * - Rellena #cMuni con options tomando datos de window.MUNICIPIOS_MODULE.features o municipios.json
+ * - Inicializa TomSelect en #cMuni (window.muniTS)
+ * - Devuelve array de municipios cargados [{label, value, normal}]
+ */
+async function loadMunicipiosSelect(force=false){
+  // cache
+  window.APP = window.APP || {};
+  if (!force && Array.isArray(window.APP.municipiosList) && window.APP.municipiosList.length) {
+    _initMuniTomSelect(window.APP.municipiosList);
+    return window.APP.municipiosList;
+  }
+
+  let list = [];
+
+  // 1) Preferir datos ya parseados por tu módulo
+  if (window.MUNICIPIOS_MODULE && Array.isArray(window.MUNICIPIOS_MODULE.features) && window.MUNICIPIOS_MODULE.features.length){
+    list = window.MUNICIPIOS_MODULE.features.map(f=>{
+      const name = (f.properties && (f.properties.municipio || f.properties.Municipio)) ? (f.properties.municipio || f.properties.Municipio) : '(sin nombre)';
+      return { label: name, value: name, normal: _norm(name) };
+    });
+  } else {
+    // 2) Fallback: intentar cargar el JSON directamente
+    try {
+      const res = await fetch('/static/municipios.json', {cache:'no-store'});
+      if (res.ok){
+        const arr = await res.json();
+        list = (arr || []).map(it => {
+          const name = it.municipio || it.Municipio || it.nombre || '';
+          return { label: name, value: name, normal: _norm(name) };
+        });
+      }
+    } catch (e) {
+      console.warn('loadMunicipiosSelect: no se pudo cargar municipios.json', e);
+    }
+  }
+
+  // dedupe por normal
+  const seen = new Set();
+  const uniq = [];
+  for (const it of list){
+    if (!it || !it.normal) continue;
+    if (seen.has(it.normal)) continue;
+    seen.add(it.normal);
+    uniq.push(it);
+  }
+  window.APP.municipiosList = uniq;
+
+  _initMuniTomSelect(uniq);
+  return uniq;
+}
+
+
+
+//HELPERS ROL========
 // wrapper para llamadas al API (usa tu apiGet/apiPost existentes)
 async function fetchCurrentUser() {
   if (window.CACHED_USER) return window.CACHED_USER;
@@ -1237,6 +1296,7 @@ if (btn.id === 'btnCrear') {
 
     // datos frescos y repinta calendario en la fecha creada
     await reloadUI();
+    await loadMunicipiosSelect();
     refreshCalendarUI({ preserve: true, hintDate: fFecha });
   });
   return;
@@ -1767,12 +1827,61 @@ if (btn.id === 'btnGuardarPersona') {
     return;
   }
 
- // === Exportar Excel de invitaciones ===
   // === Exportar a Excel (invitaciones confirmadas) ===
   if (btn.id === 'btnExportXlsx') {
-    await handleExportXlsx(btn);
-    return;
+    try {
+      // Construir parámetros de exportación según filtros activos
+      const params = new URLSearchParams();
 
+      // Rango de fechas (si existen inputs)
+      const desde = (document.getElementById('fDesde')?.value || '').trim();
+      const hasta = (document.getElementById('fHasta')?.value || '').trim();
+      if (desde) params.set('desde', desde);
+      if (hasta) params.set('hasta', hasta);
+
+      // Estatus activo (si usas botones de filtro)
+      const estatus = document.querySelector('#statusBtns .btn.active')?.dataset.status || '';
+      if (estatus) params.set('estatus', estatus);
+
+      // Construir URL final (usa tu endpoint real)
+      const qs = params.toString();
+      const url = '/api/report/confirmados.xlsx' + (qs ? ('?' + qs) : '');
+
+      // Estado visual mientras genera el archivo
+      btn.disabled = true;
+      const prevHTML = btn.innerHTML;
+      btn.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i> Generando...';
+
+      // Realizar la descarga con fetch (mantiene autenticación)
+      fetch(url, { credentials: 'same-origin' })
+        .then(res => {
+          if (!res.ok) throw new Error(`Error ${res.status} al exportar`);
+          return res.blob();
+        })
+        .then(blob => {
+          const href = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const hoy = new Date().toISOString().slice(0, 10);
+          a.href = href;
+          a.download = `invitaciones_${hoy}.xlsx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(href);
+        })
+        .catch(err => {
+          console.error('❌ Error exportando:', err);
+          alert('No se pudo generar el archivo.\n' + (err.message || err));
+        })
+        .finally(() => {
+          btn.disabled = false;
+          btn.innerHTML = prevHTML;
+        });
+    } catch (err) {
+      console.error('Error inesperado en exportación:', err);
+      alert('❌ Error inesperado al exportar.');
+    }
+    return;
   }
 
   // Guardar actor nuevo
@@ -3176,23 +3285,23 @@ const MUNICIPIOS =
         "Atlacomulco", "Atlautla", "Axapusco", "Ayapango", "Calimaya",
         "Capulhuac", "Coacalco de Berriozábal", "Coatepec Harinas", "Cocotitlán",
         "Coyotepec", "Cuautitlán", "Chalco", "Chapa de Mota", "Chapultepec",
-        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Cuautitlán Izcalli", "Donato Guerra",
+        "Chiautla", "Chicoloapan", "Chiconcuac", "Chimalhuacán", "Donato Guerra",
         "Ecatepec de Morelos", "Ecatzingo", "Huehuetoca", "Hueypoxtla", "Huixquilucan",
         "Isidro Fabela", "Ixtapaluca", "Ixtapan de la Sal", "Ixtapan del Oro",
         "Ixtlahuaca", "Xalatlaco", "Jaltenco", "Jilotepec", "Jilotzingo", "Jiquipilco",
-        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Luvianos", "Malinalco", "Melchor Ocampo",
+        "Jocotitlán", "Joquicingo", "Juchitepec", "Lerma", "Malinalco", "Melchor Ocampo",
         "Metepec", "Mexicaltzingo", "Morelos", "Naucalpan de Juárez", "Nezahualcóyotl",
         "Nextlalpan", "Nicolás Romero", "Nopaltepec", "Ocoyoacac", "Ocuilan",
         "El Oro", "Otumba", "Otzoloapan", "Otzolotepec", "Ozumba", "Papalotla",
-        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San José del Rincón", "San Felipe del Progreso",
+        "La Paz", "Polotitlán", "Rayón", "San Antonio la Isla", "San Felipe del Progreso",
         "San Martín de las Pirámides", "San Mateo Atenco", "San Simón de Guerrero",
         "Santo Tomás", "Soyaniquilpan de Juárez", "Sultepec", "Tecámac", "Tejupilco",
         "Temamatla", "Temascalapa", "Temascalcingo", "Temascaltepec", "Temoaya",
         "Tenancingo", "Tenango del Aire", "Tenango del Valle", "Teoloyucan", "Teotihuacán",
         "Tepetlaoxtoc", "Tepetlixpa", "Tepotzotlán", "Tequixquiac", "Texcaltitlán",
-        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tonanitla", "Tlalmanalco",
+        "Texcalyacac", "Texcoco", "Tezoyuca", "Tianguistenco", "Timilpan", "Tlalmanalco",
         "Tlalnepantla de Baz", "Tlatlaya", "Toluca", "Tonatico", "Tultepec", "Tultitlán",
-        "Valle de Bravo", "Valle de Chalco Solidaridad", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
+        "Valle de Bravo", "Villa de Allende", "Villa del Carbón", "Villa Guerrero",
         "Villa Victoria", "Xonacatlán", "Zacazonapan", "Zacualpan", "Zinacantepec",
         "Zumpahuacán", "Zumpango"
 ];
@@ -3212,6 +3321,8 @@ const MUNICIPIOS =
         opt.textContent = m;
         selMunii.appendChild(opt);
       });
+
+
 
 // Helpers: cargar catálogo para el selector
 async function loadPersonasForPanel(q = '') {
