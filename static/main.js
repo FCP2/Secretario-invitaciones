@@ -51,6 +51,69 @@ function partidoPillHtml(partido) {
 
 
 //HELPERS ROL========
+// Handler para exportar XLSX — usar async/await y manejo robusto
+async function handleExportXlsx(btn) {
+  // botón y estado visual
+  btn.disabled = true;
+  const prevHTML = btn.innerHTML;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i> Generando...';
+
+  try {
+    // construir params (igual que ya tienes)
+    const params = new URLSearchParams();
+    const desde = (document.getElementById('fDesde')?.value || '').trim();
+    const hasta = (document.getElementById('fHasta')?.value || '').trim();
+    if (desde) params.set('desde', desde);
+    if (hasta) params.set('hasta', hasta);
+    const estatus = document.querySelector('#statusBtns .btn.active')?.dataset.status || '';
+    if (estatus) params.set('estatus', estatus);
+
+    const qs = params.toString();
+    const url = '/api/report/confirmados.xlsx' + (qs ? ('?' + qs) : '');
+
+    // fetch con include para credenciales; captura body con posible HTML/JSON de error
+    const res = await fetch(url, { credentials: 'include' });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        if (contentType.includes('application/json')) {
+          const j = await res.json();
+          detail = j?.error || j?.message || detail;
+        } else {
+          const txt = await res.text();
+          detail = txt ? txt.slice(0, 2000) : detail; // truncar si es HTML largo
+        }
+      } catch (err) {
+        console.warn('No se pudo parsear body de error:', err);
+      }
+      throw new Error(detail);
+    }
+
+    // leer blob y forzar descarga
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const hoy = new Date().toISOString().slice(0, 10);
+    a.href = href;
+    a.download = `invitaciones_${hoy}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(href);
+
+  } catch (err) {
+    console.error('❌ Error exportando:', err);
+    // intenta mostrar mensaje útil al usuario (truncado para no romper alert)
+    const msg = (err && err.message) ? String(err.message).slice(0, 2000) : 'Error desconocido';
+    alert('No se pudo generar el archivo.\n' + msg);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = prevHTML;
+  }
+}
+
 // wrapper para llamadas al API (usa tu apiGet/apiPost existentes)
 async function fetchCurrentUser() {
   if (window.CACHED_USER) return window.CACHED_USER;
@@ -1707,59 +1770,9 @@ if (btn.id === 'btnGuardarPersona') {
  // === Exportar Excel de invitaciones ===
   // === Exportar a Excel (invitaciones confirmadas) ===
   if (btn.id === 'btnExportXlsx') {
-    try {
-      // Construir parámetros de exportación según filtros activos
-      const params = new URLSearchParams();
-
-      // Rango de fechas (si existen inputs)
-      const desde = (document.getElementById('fDesde')?.value || '').trim();
-      const hasta = (document.getElementById('fHasta')?.value || '').trim();
-      if (desde) params.set('desde', desde);
-      if (hasta) params.set('hasta', hasta);
-
-      // Estatus activo (si usas botones de filtro)
-      const estatus = document.querySelector('#statusBtns .btn.active')?.dataset.status || '';
-      if (estatus) params.set('estatus', estatus);
-
-      // Construir URL final (usa tu endpoint real)
-      const qs = params.toString();
-      const url = '/api/report/confirmados.xlsx' + (qs ? ('?' + qs) : '');
-
-      // Estado visual mientras genera el archivo
-      btn.disabled = true;
-      const prevHTML = btn.innerHTML;
-      btn.innerHTML = '<i class="fa fa-spinner fa-spin me-1"></i> Generando...';
-
-      // Realizar la descarga con fetch (mantiene autenticación)
-      fetch(url, { credentials: 'same-origin' })
-        .then(res => {
-          if (!res.ok) throw new Error(`Error ${res.status} al exportar`);
-          return res.blob();
-        })
-        .then(blob => {
-          const href = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          const hoy = new Date().toISOString().slice(0, 10);
-          a.href = href;
-          a.download = `invitaciones_${hoy}.xlsx`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(href);
-        })
-        .catch(err => {
-          console.error('❌ Error exportando:', err);
-          alert('No se pudo generar el archivo.\n' + (err.message || err));
-        })
-        .finally(() => {
-          btn.disabled = false;
-          btn.innerHTML = prevHTML;
-        });
-    } catch (err) {
-      console.error('Error inesperado en exportación:', err);
-      alert('❌ Error inesperado al exportar.');
-    }
+    await handleExportXlsx(btn);
     return;
+
   }
 
   // Guardar actor nuevo
