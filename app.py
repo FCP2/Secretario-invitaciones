@@ -2061,6 +2061,41 @@ def api_notif_by_inv(inv_id):
     finally:
         db.close()
 
+@app.get("/_debug/report_xlsx")
+@auth_required(['admin','viewer'])
+def debug_export_xlsx():
+    """
+    Debug rápido: intenta ejecutar la lógica de export pero captura y devuelve la traza completa.
+    Úsalo temporalmente para ver exactamente qué exception ocurre en Render.
+    """
+    db = SessionLocal()
+    try:
+        # --- aquí llama a tu función que genera `df` o copia la lógica ---
+        # Para reutilizar, si tienes la función que construye `out`/`df` extrae esa lógica
+        # a una función y llámala aquí. Si no, pega tu lógica para generar `df`.
+
+        # ejemplo mínimo: intenta crear un pequeño df y convertirlo
+        import pandas as pd
+        from io import BytesIO
+
+        sample = [{"a":1,"b":"x"},{"a":2,"b":"y"}]
+        df = pd.DataFrame(sample)
+
+        bio = BytesIO()
+        with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Prueba")
+        bio.seek(0)
+
+        # si llegamos OK, respondemos con un mensaje pequeño (no el xlsx)
+        return jsonify({"ok": True, "msg": "Generación de Excel de prueba OK en servidor."})
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        app_ctx.logger.exception("Debug export error")
+        # devolver la traza en la respuesta (temporal, inseguro para producción)
+        return make_response(jsonify({"ok": False, "error": str(e), "trace": tb}), 500)
+    finally:
+        db.close()
 
 @app.get("/api/report/confirmados.xlsx")
 @auth_required(['admin','viewer'])
