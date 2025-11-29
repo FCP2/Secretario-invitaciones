@@ -186,9 +186,9 @@ MUNICIPIOS_EDOMEX = [
 ]
 VALID_MUNICIPIOS_LOWER = {m.casefold(): m for m in MUNICIPIOS_EDOMEX}
 # ===== Perillas de tiempo (ajústalas a tu operación) =====
-DEFAULT_DURATION_MIN = 120   # duración lógica de cada evento (si no tienes hora_fin)
-BUFFER_MIN           = 20    # colchón antes/después (traslados)
-MIN_GAP_MIN          = 45    # separación mínima entre eventos (aunque no se traslapen)
+DEFAULT_DURATION_MIN = 30   # duración lógica de cada evento (si no tienes hora_fin)
+BUFFER_MIN           = 10    # colchón antes/después (traslados)
+MIN_GAP_MIN          = 20    # separación mínima entre eventos (aunque no se traslapen)
 
 def _as_dt(fecha, hora):
     if not fecha or not hora:
