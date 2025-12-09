@@ -692,15 +692,32 @@ async function reloadUI(){
   renderListInto(presList,  "#groupPres");
   renderListInto(otrosList, "#groupOtros");
 
-  // 6) KPIs
-  const kpi = { Pendiente:0, Confirmado:0, Sustituido:0, Cancelado:0 };
-  invs.forEach(i => { const e = i.Estatus || "Pendiente"; if (kpi[e] != null) kpi[e]++; });
+  // 6) KPIs por MUNICIPIO ÚNICO
+const norm = s => (s || "").trim().toLowerCase();
 
-  const set = (sel,val)=>{ const el=document.querySelector(sel); if(el) el.textContent=val; };
-  set('#kpiPend', kpi.Pendiente);
-  set('#kpiConf', kpi.Confirmado);
-  set('#kpiSubs', kpi.Sustituido);
-  set('#kpiCanc', kpi.Cancelado);
+// Mapa estatus → Set de municipios
+const kpiSets = {
+  Pendiente:  new Set(),
+  Confirmado: new Set(),
+  Sustituido: new Set(),
+  Cancelado:  new Set()
+};
+
+invs.forEach(i => {
+  const est = i.Estatus || "Pendiente";
+  const muni = norm(i.Municipio || i.municipio);
+
+  if (muni && kpiSets[est]) {
+    kpiSets[est].add(muni);
+  }
+});
+
+// Escribir resultados en HTML
+const set = (sel,val)=>{ const el=document.querySelector(sel); if(el) el.textContent=val; };
+set('#kpiPend', kpiSets.Pendiente.size);
+set('#kpiConf', kpiSets.Confirmado.size);
+set('#kpiSubs', kpiSets.Sustituido.size);
+set('#kpiCanc', kpiSets.Cancelado.size);
 
   // Contadores por tab
   const setCnt = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
